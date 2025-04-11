@@ -26,6 +26,7 @@ private let envDataDir = "\(envPrefix)_DATADIR"
 private let envVMName = "\(envPrefix)_VMNAME"
 private let envNoAsk = "\(envPrefix)_NOASK"
 private let envDebug = "\(envPrefix)_DEBUG"
+private let envExitOnPID = "\(envPrefix)_EXIT_ON_PID"
 
 struct CLI: AsyncParsableCommand {
     static var configuration = CommandConfiguration(
@@ -174,6 +175,37 @@ struct CLI: AsyncParsableCommand {
 
         return res.count > 0 ? res : nil
     }
+
+    // awaitInterrupt parks the main process thread until interrupted -- if _EXIT_ON_PID envvar is set
+    //  (containing a PID, typically that of pccvre process that launched us), monitor the process in
+    //  case it exits (possibly abnormally - normal exit usually sends termination signal) and shut down
+    //  with a non-zero exit code (if PID doesn't exist, it will immediately exit). When vm passed in, it
+    //  will formally stop() it when PID monitor triggered.
+    static func awaitInterrupt(vm: VM? = nil) async {
+        let rq: DispatchQueue
+        let dsps: DispatchSourceProcess
+        if let pidenv = ProcessInfo().environment[envExitOnPID],
+           let pid = pid_t(pidenv), pid > 0
+        {
+            rq = vm?.runQueue ?? .init(label: applicationName)
+            dsps = DispatchSource.makeProcessSource(identifier: pid,
+                                                    eventMask: .exit,
+                                                    queue: rq)
+            dsps.setEventHandler {
+                VM.logger.log("exiting upon PID [\(pid, privacy: .public)] termination")
+                if let vzVM = vm?.vzVM {
+                    vzVM.stop { _ in _stdlib.exit(1) }
+                } else {
+                    _stdlib.exit(1)
+                }
+            }
+
+            dsps.resume()
+        }
+
+        let (stream, _) = AsyncStream<Void>.makeStream()
+        for try await _ in stream {} // park until interrupted
+    }
 }
 
 extension CLI {
@@ -209,7 +241,7 @@ extension CLI {
 // CLIError provides a generic error wrapper for top-level CLI commands
 struct CLIError: Error, CustomStringConvertible {
     var message: String
-    var description: String { self.message }
+    var description: String { message }
 
     init(_ message: String) {
         VM.logger.error("\(message, privacy: .public)")

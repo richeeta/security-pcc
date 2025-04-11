@@ -78,15 +78,8 @@ extension CloudBoardApp {
 extension CloudBoardApp {
     package static func bootstrap(
         server: CloudBoardJobAPIServerProtocol,
-        metricsBuilder: CloudAppMetrics.Builder,
-        preferencesOverride: CloudBoardJobConfig? = nil
+        metricsBuilder: CloudAppMetrics.Builder
     ) async throws {
-        let preferences = if let preferencesOverride {
-            preferencesOverride
-        } else {
-            try CloudBoardJobConfig.fromPreferences()
-        }
-
         // Create the stream and ResponseWriter to handle output
         let (outputStream, outputStreamContinuation) = AsyncStream<Data>.makeStream()
         let responseWriter = ResponseWriter(outputStreamContinuation)
@@ -99,15 +92,13 @@ extension CloudBoardApp {
         let (teardownRequestStream, teardownRequestStreamContinuation) = AsyncStream<Void>.makeStream()
 
         let appInstance = Self()
-        let waitForParametersEnabled = preferences.waitForParameters ?? true
         let xpcMessenger = await JobHelperMessenger(
             server: server,
             inputContinuation: inputStreamContinuation,
             teardownContinuation: teardownRequestStreamContinuation,
             log: log,
             appInstance: appInstance,
-            metricsBuilder: metricsBuilder,
-            waitForParametersEnabled: waitForParametersEnabled
+            metricsBuilder: metricsBuilder
         )
 
         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -123,19 +114,16 @@ extension CloudBoardApp {
                     subGroup.addTask {
                         try await xpcMessenger.waitForWarmupComplete()
 
-                        var parameters: ParametersData?
-                        if waitForParametersEnabled {
-                            parameters = try await xpcMessenger.waitForParameters()
-                        }
+                        let parameters = try await xpcMessenger.waitForParameters()
                         let metrics = await xpcMessenger.buildMetrics()
                         do {
                             let environment = CloudAppEnvironment(
                                 metrics: metrics,
-                                plaintextMetadata: .init(parameters?.plaintextMetadata)
+                                plaintextMetadata: .init(parameters.plaintextMetadata)
                             )
                             log.debug("""
                             CloudBoardJob invoked with: \
-                            requestID=\(environment.plaintextMetadata.requestID, privacy: .public)
+                            request.uuid=\(environment.plaintextMetadata.requestID, privacy: .public)
                             bundleID=\(environment.plaintextMetadata.bundleID, privacy: .public)
                             bundleVersion=\(environment.plaintextMetadata.bundleVersion, privacy: .public)
                             featureID=\(environment.plaintextMetadata.featureID, privacy: .public)

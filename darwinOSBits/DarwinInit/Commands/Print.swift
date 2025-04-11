@@ -34,6 +34,9 @@ the generate or apply subcommands, it will not be printed.
     @Flag(name: .shortAndLong, help: "Print the system configuration")
     var system: Bool = false
 
+    @Flag(name: .shortAndLong, help: "Print the unredacted configuration")
+    var unredacted: Bool = false
+    
     func validate() throws {
         if source == nil && !system {
             throw ValidationError("Must specify either source or --system")
@@ -42,7 +45,7 @@ the generate or apply subcommands, it will not be printed.
 
     func run() async throws {
         let loadedConfig = try await DInitConfigLoader.load(from: source)
-        let json = try loadedConfig.config.jsonString()
+        let json = try loadedConfig.config.jsonString(redactCredentialStrings: !unredacted)
         print(json)
     }
 }

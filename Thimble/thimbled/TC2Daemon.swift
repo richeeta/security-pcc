@@ -24,23 +24,24 @@ import Foundation
 import Foundation_Private.NSBackgroundActivityScheduler
 import Foundation_Private.NSXPCConnection
 import PrivateCloudCompute
-import os.lock
+import Synchronization
 
 @available(iOS 18.0, *)
 @main
 final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, Sendable, TC2Sandbox {
-    let logger = tc2Logger(forCategory: .Daemon)
+    let logger = tc2Logger(forCategory: .daemon)
+    let systemInfo: SystemInfo
     let serverDrivenConfig: TC2ServerDrivenConfiguration
     let config = TC2DefaultConfiguration()
-    let prefetchActivity: TC2PrefetchActivity
-    let updateServerDrivenConfigurationActivity: TC2UpdateServerDrivenConfigurationActivity
+    let prefetchActivity: TC2PrefetchActivity<SystemInfo>
+    let updateServerDrivenConfigurationActivity: TC2UpdateServerDrivenConfigurationActivity<SystemInfo>
     let rateLimiter: RateLimiter
     let attestationStore: TC2AttestationStore?
     let attestationVerifier: TC2CloudAttestationVerifier
-    let dailyActiveUserReporter = DailyActiveUsersReporter<UserDefaultsStore>()
+    let dailyActiveUserReporter: DailyActiveUsersReporter<UserDefaultsStore, SystemInfo>
     let tapToRadarController = TapToRadarController()
-    let nodeDistributionAnalyzer: NodeDistributionAnalyzer
-    let nodeDistributionReportActivity: NodeDistributionAnalyzerReportActivity
+    let nodeDistributionAnalyzer: NodeDistributionAnalyzer<SystemInfo>
+    let nodeDistributionReportActivity: NodeDistributionAnalyzerReportActivity<SystemInfo>
 
     let (thimbledEventStream, thimbledEventContinuation) = AsyncStream.makeStream(of: ThimbledEvent.self)
 
@@ -56,7 +57,7 @@ final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, S
         return .init(preregisteredIdentifier: "com.apple.privatecloudcompute.nodeDistributionReport", work: nodeDistributionReportActivity)
     }
 
-    let structuredRequestFactoriesBySetup: OSAllocatedUnfairLock<[TC2ResolvedSetup: ThimbledTrustedRequestFactory]> = OSAllocatedUnfairLock(initialState: [:])
+    let structuredRequestFactoriesBySetup: Mutex<[TC2ResolvedSetup: ThimbledTrustedRequestFactory]> = Mutex([:])
 
     var requestMetadata: TC2TrustedRequestFactoriesMetadata {
         let metadata = self.structuredRequestFactoriesBySetup.withLock { $0.values.compactMap { $0.getRequestMetadata() } }
@@ -66,34 +67,50 @@ final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, S
     let prefetchTracker = TC2PrefetchTracker()
 
     static func main() async {
+        enterSandbox(identifier: "com.apple.privatecloudcomputed", macOSProfile: "com.apple.privatecloudcomputed")
+        #if os(macOS)
+        await withSandboxDataContainer { url in
+            let instance = TC2Daemon(dataContainerUrl: url)
+            await instance.main()
+        }
+        #else
         let instance = TC2Daemon()
         await instance.main()
+        #endif
     }
 
-    override init() {
-        let daemonDirectoryPath = getDaemonDirectoryPath()
-        let environment = self.config.environment
+    init(dataContainerUrl: URL? = nil) {
+        let (daemonDirectoryPath, migrateFromPath) = getDaemonDirectoryPath(dataContainerUrl: dataContainerUrl)
+        if let migrateFromPath {
+            migrateDaemon(from: migrateFromPath, to: daemonDirectoryPath)
+        }
+        self.systemInfo = SystemInfo()
+        let environment = self.config.environment(systemInfo: self.systemInfo)
         self.rateLimiter = RateLimiter(config: self.config, from: daemonDirectoryPath)
         self.attestationStore = TC2AttestationStore(environment: environment, dir: daemonDirectoryPath)
         self.serverDrivenConfig = TC2ServerDrivenConfiguration(from: daemonDirectoryPath)
         self.attestationVerifier = TC2CloudAttestationVerifier(environment: environment)
+        self.dailyActiveUserReporter = DailyActiveUsersReporter<UserDefaultsStore, SystemInfo>(systemInfo: self.systemInfo)
         self.prefetchActivity = TC2PrefetchActivity(
             rateLimiter: self.rateLimiter,
             attestationStore: self.attestationStore,
-            attestationVerifer: self.attestationVerifier,
+            attestationVerifier: self.attestationVerifier,
             config: self.config,
             daemonDirectoryPath: daemonDirectoryPath,
             serverDrivenConfig: self.serverDrivenConfig,
+            systemInfo: self.systemInfo,
             eventStreamContinuation: self.thimbledEventContinuation,
             prefetchTracker: self.prefetchTracker
         )
         self.updateServerDrivenConfigurationActivity = TC2UpdateServerDrivenConfigurationActivity(
             serverDrivenConfig: self.serverDrivenConfig,
+            systemInfo: systemInfo,
             config: self.config
         )
         self.nodeDistributionAnalyzer = NodeDistributionAnalyzer(
             environment: environment.name,
-            storeURL: daemonDirectoryPath
+            storeURL: daemonDirectoryPath,
+            systemInfo: self.systemInfo
         )
         self.nodeDistributionReportActivity = NodeDistributionAnalyzerReportActivity(
             eventStreamContinuation: self.thimbledEventContinuation,
@@ -101,7 +118,7 @@ final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, S
         )
 
         super.init()
-        logger.log("Starting daemon. tc2OSInfo: \(tc2OSInfo)")
+        logger.log("Starting daemon. tc2OSInfo: \(self.systemInfo.osInfo)")
     }
 
     func structuredRequestFactory(forSetup setup: TC2ResolvedSetup) -> ThimbledTrustedRequestFactory {
@@ -112,6 +129,7 @@ final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, S
                 let factory = ThimbledTrustedRequestFactory(
                     config: self.config,
                     serverDrivenConfig: self.serverDrivenConfig,
+                    systemInfo: systemInfo,
                     connectionFactory: NWAsyncConnection(),
                     attestationStore: self.attestationStore,
                     attestationVerifier: self.attestationVerifier,
@@ -130,8 +148,6 @@ final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, S
     }
 
     func main() async {
-        self.logger.log("Entering sandbox")
-        Self.enterSandbox(identifier: "com.apple.privatecloudcomputed", macOSProfile: "com.apple.privatecloudcomputed")
         do {
             self.logger.log("Setting up CloudTelemetry xpc service activities.")
             try await CloudTelemetry.setupXpcServiceActivities()
@@ -272,11 +288,11 @@ final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, S
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
         logger.log("Thimble trying to connect: checking entitlements")
 
-        let hasEntitlement = TC2Entitlement.allCases.contains { entitlement in
+        let hasEntitlement = PrivateCloudComputeEntitlement.allCases.contains { entitlement in
             return newConnection.value(forEntitlement: entitlement.rawValue) as? Bool == true
         }
         guard hasEntitlement else {
-            logger.log("Rejecting connection because it doesn't have any of the required entitlements: \(String(describing: TC2Entitlement.allCases))")
+            logger.log("Rejecting connection because it doesn't have any of the required entitlements: \(String(describing: PrivateCloudComputeEntitlement.allCases))")
             return false
         }
 
@@ -287,7 +303,7 @@ final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, S
         newConnection.exportedInterface = interfaceForTC2DaemonProtocol()
 
         // Next, set the object that the connection exports. All messages sent on the connection to this service will be sent to the exported object to handle. The connection retains the exported object.
-        let exportedObject = TC2DaemonHost(config: self.config, delegate: self, connection: newConnection)
+        let exportedObject = TC2DaemonHost(config: self.config, systemInfo: self.systemInfo, delegate: self, connection: newConnection)
         newConnection.exportedObject = exportedObject
 
         // Resuming the connection allows the system to deliver more incoming messages.
@@ -321,6 +337,7 @@ final class TC2Daemon: NSObject, NSXPCListenerDelegate, TC2DaemonHostDelegate, S
                             attestationVerifier: self.attestationVerifier,
                             config: self.config,
                             serverDrivenConfig: self.serverDrivenConfig,
+                            systemInfo: systemInfo,
                             parameters: .init(
                                 pipelineKind: parameters.pipelineKind,
                                 pipelineArguments: parameters.pipelineArguments

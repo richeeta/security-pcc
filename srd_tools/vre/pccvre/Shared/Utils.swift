@@ -17,7 +17,6 @@
 
 import CryptoKit
 import Foundation
-import os
 
 // dateFormat is normalized form used in tool when displaying dates [YYYY-MM-DDTHH:mm:SS] in local TZ
 private let dateFormat = Date.ISO8601FormatStyle(timeZone: TimeZone.current)
@@ -44,7 +43,7 @@ func dateAsString(_ date: Date) -> String {
 
 // asJSONString returns (Codable) data as json string, or empty ("{}") if unable to;
 //  if pretty == true, result is "pretty printed" with newlines and sorted keys
-func asJSONString(_ data: (any Codable)?, pretty: Bool = false) -> String {
+func asJSONString(_ data: (any Encodable)?, pretty: Bool = false) -> String {
     if let data {
         let jsonEncoder = JSONEncoder()
         jsonEncoder.outputFormatting = pretty ?
@@ -104,21 +103,29 @@ struct ExecCommand {
 
             stdoutPipe.fileHandleForReading.readabilityHandler = {
                 let data = $0.availableData
-                if !data.isEmpty {
-                    stdoutData.append(data)
-                    if outputMode == .tee {
-                        fputs(String(decoding: data, as: UTF8.self), stdout)
-                    }
+
+                guard !data.isEmpty else {
+                    $0.readabilityHandler = nil
+                    return
+                }
+
+                stdoutData.append(data)
+                if outputMode == .tee {
+                    fputs(String(decoding: data, as: UTF8.self), stdout)
                 }
             }
 
             stderrPipe.fileHandleForReading.readabilityHandler = {
                 let data = $0.availableData
-                if !data.isEmpty {
-                    stderrData.append(data)
-                    if outputMode == .tee {
-                        fputs(String(decoding: data, as: UTF8.self), stderr)
-                    }
+
+                guard !data.isEmpty else {
+                    $0.readabilityHandler = nil
+                    return
+                }
+
+                stderrData.append(data)
+                if outputMode == .tee {
+                    fputs(String(decoding: data, as: UTF8.self), stderr)
                 }
             }
 
@@ -165,141 +172,14 @@ func computeDigest(at: URL, using hashFunction: any HashFunction.Type) throws ->
     return hasher.finalize()
 }
 
-// dumpURLResponse outputs contents of response from a URLSession call to debug log channel (trace level)
-func dumpURLResponse(logger: Logger? = nil, response: URLResponse) {
-    guard let logger else {
-        return
-    }
+struct Terminal {
+    static var size: (columns: UInt16, rows: UInt16) {
+        var winSize = winsize()
 
-    func _dlog(_ msg: String) {
-        logger.debug("\(msg, privacy: .public)")
-    }
-
-    _dlog("URL Response:")
-    _dlog("  URL: \(response.url?.absoluteString ?? "unset")")
-    _dlog("  mimeType: \(response.mimeType ?? "unset")")
-    _dlog("  expectedContentLength: \(response.expectedContentLength)")
-    if let suggestedFilename = response.suggestedFilename {
-        _dlog("  suggestedFilename: \(suggestedFilename)")
-    }
-    if let textEncodingName = response.textEncodingName {
-        _dlog("  textEncodingName: \(textEncodingName)")
-    }
-
-    if let httpResponse = response as? HTTPURLResponse {
-        _dlog("  Status: \(httpResponse.statusCode)")
-        _dlog("  Headers:")
-        for (h, v) in httpResponse.allHeaderFields {
-            _dlog("    \(h as? String): \(v as? String)")
+        guard ioctl(STDOUT_FILENO, TIOCGWINSZ, &winSize) == 0 else {
+            return (0, 0)
         }
-    }
-}
 
-// getURL performs a simple GET request against url and returns payload; throws an error
-//  if request fails, doesn't obtain a 2xx response, or doesn't match provided mimeType
-func getURL(
-    logger: Logger? = nil,
-    url: URL,
-    tlsInsecure: Bool = false,
-    headers: [String: String]? = nil,
-    timeout: TimeInterval = 15,
-    mimeType: String? = nil
-) async throws -> (Data, URLResponse) {
-    var request = URLRequest(url: url, timeoutInterval: timeout)
-    addHeaders(&request, headers: headers)
-
-    return try await requestURL(
-        logger: logger,
-        request: request,
-        tlsInsecure: tlsInsecure,
-        contentType: mimeType
-    )
-}
-
-// postPBURL performs a POST request against url with requestBody containing a serialized protobuf
-//  and returns (serialized protobuf) payload; throws an error if request fails, doesn't obtain a
-//  2xx response, or response content type != "application/protobuf"
-func postPBURL(
-    logger: Logger? = nil,
-    url: URL,
-    tlsInsecure: Bool = false,
-    requestBody: Data,
-    headers: [String: String]? = nil,
-    timeout: TimeInterval = 15
-) async throws -> (Data, URLResponse) {
-    let pbContentType = "application/protobuf"
-
-    var request = URLRequest(url: url, timeoutInterval: timeout)
-    request.httpMethod = "POST"
-    request.setValue(pbContentType, forHTTPHeaderField: "Content-Type")
-    request.httpBody = requestBody
-    addHeaders(&request, headers: headers)
-
-    return try await requestURL(
-        logger: logger,
-        request: request,
-        tlsInsecure: tlsInsecure,
-        contentType: pbContentType
-    )
-}
-
-// addHeaders sets headers in request
-func addHeaders(_ request: inout URLRequest, headers: [String: String]? = nil) {
-    if let headers {
-        for (h, v) in headers {
-            request.addValue(v, forHTTPHeaderField: h)
-        }
-    }
-}
-
-// requestURL issues populated request to endpoint and returns payload and response if status code 2xx is
-//  received and (if contantType is set) confirms mimeType in payload matches expected.
-//  TLS verification is suppressed if tlsInsecure is true.
-func requestURL(
-    logger: Logger? = nil,
-    request: URLRequest,
-    tlsInsecure: Bool = false,
-    contentType: String? = nil
-) async throws -> (Data, URLResponse) {
-    let session = tlsInsecure ?
-        URLSession(configuration: .default,
-                   delegate: InsecureTLSDelegate(),
-                   delegateQueue: nil) :
-        URLSession.shared
-
-    let (respData, response) = try await session.data(for: request)
-    dumpURLResponse(logger: logger, response: response)
-
-    guard let httpResponse = response as? HTTPURLResponse else {
-        throw URLError(.badServerResponse, userInfo: ["reason": "failed to get response"])
-    }
-
-    guard (200 ... 299).contains(httpResponse.statusCode) else {
-        throw URLError(.badServerResponse, userInfo: ["reason": "request failed (error: \(httpResponse.statusCode))"])
-    }
-
-    if let contentType {
-        guard httpResponse.mimeType == contentType else {
-            throw URLError(.cannotParseResponse,
-                           userInfo: ["reason": "request returned contentType=\(httpResponse.mimeType ?? "unset")"])
-        }
-    }
-
-    return (respData, response)
-}
-
-// InsecureTLSDelegate is a URLSessionDelegate to bypass certificate errors on TLS connections
-private class InsecureTLSDelegate: NSObject, URLSessionDelegate {
-    public func urlSession(
-        _ session: URLSession,
-        didReceive challenge: URLAuthenticationChallenge,
-        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-    ) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
-            completionHandler(.useCredential,
-                              URLCredential(trust: challenge.protectionSpace.serverTrust!))
-        } else {
-            completionHandler(.performDefaultHandling, nil)
-        }
+        return (columns: winSize.ws_col, rows: winSize.ws_row)
     }
 }

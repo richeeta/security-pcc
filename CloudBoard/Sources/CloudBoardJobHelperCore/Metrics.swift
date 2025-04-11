@@ -137,6 +137,7 @@ enum Metrics {
         struct ErrorExitCounter: Counter {
             static let label: MetricLabel = "\(prefix)_daemon_exit_error"
             var action: CounterAction
+            var dimensions: MetricDimensions<DefaultErrorDimensionKeys>
         }
 
         struct TotalExitCounter: Counter {

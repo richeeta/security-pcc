@@ -21,12 +21,12 @@ import os
 import System
 
 public struct MonitoredLaunchdJobInstance {
-    public init(_ managedJob: ManagedLaunchdJob, metrics: (any MetricsSystem)? = nil) throws {
-        self.job = try LaunchdJob(managedJob, metrics: metrics)
+    public init(_ managedJob: ManagedLaunchdJob, metrics: (any MetricsSystem)? = nil) {
+        self.job = LaunchdJob(managedJob, metrics: metrics)
     }
 
-    public init(_ managedJob: ManagedLaunchdJob, uuid: UUID, metrics: (any MetricsSystem)? = nil) throws {
-        self.job = try LaunchdJob(managedJob, uuid: uuid, metrics: metrics)
+    public init(_ managedJob: ManagedLaunchdJob, uuid: UUID, metrics: (any MetricsSystem)? = nil) {
+        self.job = LaunchdJob(managedJob, uuid: uuid, metrics: metrics)
     }
 
     internal var job: LaunchdJob

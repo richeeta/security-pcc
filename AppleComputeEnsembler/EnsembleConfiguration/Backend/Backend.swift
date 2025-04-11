@@ -22,7 +22,7 @@
 import Foundation
 
 /// Known record of all backends
-public enum BackendType: CustomStringConvertible, Decodable {
+public enum BackendType: String, CustomStringConvertible, Decodable {
 	case None
 	case CIOBackend
 	case StubBackend
@@ -44,11 +44,9 @@ enum BackendConnectionDirection: CustomStringConvertible {
 	case rx
 
 	public var description: String {
-		get {
-			switch self {
-			case .tx: return ".tx"
-			case .rx: return ".rx"
-			}
+		switch self {
+		case .tx: return ".tx"
+		case .rx: return ".rx"
 		}
 	}
 }
@@ -131,15 +129,15 @@ protocol Backend {
 	/// Returns a dictionary of the ACIO connectivity state
 	func getCIOCableState() throws -> [[String: AnyObject]]
 
-    /// set the crypto key
+	/// set the crypto key
 	func setCryptoKey(key: Data, flags: UInt32) throws
-    
-    /// get the crypto key
-    func getCryptoKey() throws -> Data
-    
-    /// gets the number of buffers that can be allocated per Crypto Key.
-    func getMaxBuffersPerKey() throws -> UInt64
-    
-    /// gets the number of seconds that can be used for a crypto key
-    func getMaxSecondsPerKey() throws -> UInt64
+
+	/// get the crypto key
+	func getCryptoKey() throws -> Data
+
+	/// gets the number of buffers that can be allocated per Crypto Key.
+	func getMaxBuffersPerKey() throws -> UInt64
+
+	/// gets the number of seconds that can be used for a crypto key
+	func getMaxSecondsPerKey() throws -> UInt64
 }

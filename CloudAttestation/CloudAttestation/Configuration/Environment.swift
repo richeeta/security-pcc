@@ -28,6 +28,7 @@ public enum Environment: String, Sendable, Codable {
     case perf
     case qa
     case staging
+    case uat
     case carry
     case production
     // For internal testing
@@ -73,38 +74,37 @@ public enum Environment: String, Sendable, Codable {
         return Self.default
     }
 
-    public var transparencyURL: URL {
-        let productionURL = "https://kttcc-prod.ess.apple.com"
+    public var initTransparencyURL: URL {
+        return update(url: "https://init-kt-prod.ess.apple.com")
+    }
 
-        return switch self {
-        case .qa2Primary, .qa2Internal:
-            URL(string: productionURL.replacingOccurrences(of: "prod", with: "qa2"))!
-        case .dev, .ephemeral, .perf, .qa, .staging:
-            URL(string: productionURL.replacingOccurrences(of: "prod", with: "qa1"))!
-        case .carry, .production:
-            URL(string: productionURL)!
-        }
+    public var transparencyURL: URL {
+        return update(url: "https://kttcc-prod.ess.apple.com")
     }
 
     public var authenticatingTransparencyURL: URL {
-        let productionInternalURL = "https://kttcc-internal-prod.ess.apple.com"
-
-        return switch self {
-        case .qa2Primary, .qa2Internal:
-            URL(string: productionInternalURL.replacingOccurrences(of: "prod", with: "qa2"))!
-        case .dev, .ephemeral, .perf, .qa, .staging:
-            URL(string: productionInternalURL.replacingOccurrences(of: "prod", with: "qa1"))!
-        case .carry, .production:
-            URL(string: productionInternalURL)!
-        }
+        return update(url: "https://kttcc-internal-prod.ess.apple.com")
     }
 
     public var transparencyPrimaryTree: Bool {
         switch self {
         case .staging, .production, .qa2Primary:
             true
-        case .dev, .ephemeral, .perf, .qa, .carry, .qa2Internal:
+        case .dev, .ephemeral, .perf, .qa, .uat, .carry, .qa2Internal:
             false
+        }
+    }
+
+    fileprivate func update(url: String) -> URL {
+        switch self {
+        case .qa2Primary, .qa2Internal:
+            URL(string: url.replacingOccurrences(of: "prod", with: "qa2"))!
+        case .dev, .ephemeral, .perf, .qa, .staging:
+            URL(string: url.replacingOccurrences(of: "prod", with: "qa1"))!
+        case .uat, .carry:
+            URL(string: url.replacingOccurrences(of: "prod", with: "carry"))!
+        case .production:
+            URL(string: url)!
         }
     }
 }
@@ -128,7 +128,7 @@ extension Environment: Comparable {
             2
         case .staging:
             3
-        case .carry:
+        case .uat, .carry:
             4
         case .production:
             5

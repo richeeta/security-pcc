@@ -30,6 +30,7 @@ extension TransparencyLog {
         init(
             endpoint: URL, // KTInitBag base REST endpoint
             tlsInsecure: Bool = false,
+            useIdentity: Bool = false, // set x-internal header if true
             signedBag: Bool = true // request signed payload version (and verify)
         ) async throws {
             let reqParams = [
@@ -38,10 +39,11 @@ extension TransparencyLog {
             ]
             let endpoint = endpoint.appending(path: "init/getBag").appending(queryItems: reqParams)
 
-            let (data, _) = try await getURL(
-                logger: TransparencyLog.traceLog ? TransparencyLog.logger : nil,
+            let (data, _) = try await urlGet(
                 url: endpoint,
                 tlsInsecure: tlsInsecure,
+                useIdentity: false, // not actually used for this call
+                headers: useIdentity ? ["x-internal": "true"] : nil, // .. but indicate available
                 mimeType: "application/xml"
             )
 

@@ -18,10 +18,10 @@ import CloudBoardCommon
 import CloudBoardJobHelperAPI
 import CloudBoardMetrics
 
-protocol CloudBoardJobHelperInstanceProtocol: AnyActor, Sendable {
-    func invokeWorkloadRequest(_ request: InvokeWorkloadRequest) async throws
+protocol CloudBoardJobHelperInstanceProtocol: Actor {
+    func invokeWorkloadRequest(_ request: CloudBoardDaemonToJobHelperMessage) async throws
     func waitForWarmupComplete() async throws
-    func waitForExit() async throws
+    func waitForExit(returnIfNotUsed: Bool) async throws
 }
 
 protocol CloudBoardJobHelperClientProvider: Sendable {
@@ -32,6 +32,7 @@ protocol CloudBoardJobHelperClientProvider: Sendable {
 }
 
 protocol CloudBoardJobHelperResponseDelegateProvider: Sendable {
-    func makeDelegate(responseContinuation: AsyncStream<WorkloadResponse>.Continuation) async
-        -> CloudBoardJobHelperAPIClientDelegateProtocol
+    func makeDelegate(
+        invokeWorkloadResponseContinuation: AsyncStream<JobHelperInvokeWorkloadResponse>.Continuation
+    ) async -> CloudBoardJobHelperAPIClientDelegateProtocol
 }

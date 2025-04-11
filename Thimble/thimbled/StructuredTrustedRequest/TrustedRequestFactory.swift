@@ -23,13 +23,14 @@ import CollectionsInternal
 @_implementationOnly import DarwinPrivate.os.variant
 import Foundation
 import PrivateCloudCompute
-import os
+import Synchronization
 
 typealias ThimbledTrustedRequestFactory = TrustedRequestFactory<
     NWAsyncConnection,
     TC2AttestationStore,
     TC2CloudAttestationVerifier,
     RateLimiter,
+    SystemInfo,
     TC2NSPTokenProvider,
     ContinuousClock
 >
@@ -39,13 +40,15 @@ final class TrustedRequestFactory<
     AttestationStore: TC2AttestationStoreProtocol,
     AttestationVerifier: TC2AttestationVerifier,
     RateLimiter: RateLimiterProtocol,
+    SystemInfo: SystemInfoProtocol,
     TokenProvider: TC2TokenProvider,
     Clock: _Concurrency.Clock
 >: Sendable where Clock.Duration == Duration {
 
-    let logger = tc2Logger(forCategory: .Daemon)
+    let logger = tc2Logger(forCategory: .daemon)
     let config: TC2Configuration
     let serverDrivenConfig: TC2ServerDrivenConfiguration
+    let systemInfo: SystemInfo
 
     let connectionFactory: ConnectionFactory
     let attestationStore: AttestationStore?
@@ -59,17 +62,18 @@ final class TrustedRequestFactory<
     let eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation
 
     struct Metrics {
-        var running: [UUID: RequestMetrics<Clock, AttestationStore>] = [:]
+        var running: [UUID: RequestMetrics<Clock, AttestationStore, SystemInfo>] = [:]
         // previous request metadata. latest request is at the beginning.
         // oldest request is at the end.
         var previous: Deque<TC2TrustedRequestMetadata> = []
     }
 
-    private let metrics = OSAllocatedUnfairLock<Metrics>(initialState: Metrics())
+    private let metrics = Mutex(Metrics())
 
     init(
         config: TC2Configuration,
         serverDrivenConfig: TC2ServerDrivenConfiguration,
+        systemInfo: SystemInfo,
         connectionFactory: ConnectionFactory,
         attestationStore: AttestationStore?,
         attestationVerifier: AttestationVerifier,
@@ -83,6 +87,7 @@ final class TrustedRequestFactory<
     ) {
         self.config = config
         self.serverDrivenConfig = serverDrivenConfig
+        self.systemInfo = systemInfo
         self.connectionFactory = connectionFactory
         self.attestationStore = attestationStore
         self.attestationVerifier = attestationVerifier
@@ -120,7 +125,7 @@ final class TrustedRequestFactory<
         if let requestedBundleID {
             // if we aren't allowed to use the requested one, error out
             if !allowBundleIdentifierOverride {
-                self.logger.error("\(#function): client not allowed to override \(self.clientBundleIdentifier) with \(requestedBundleID). Need entitlement \(TC2Entitlement.bundleIdentifierOverride.rawValue)")
+                self.logger.error("client not allowed to override \(self.clientBundleIdentifier) with \(requestedBundleID). Need entitlement \(PrivateCloudComputeEntitlement.bundleIdentifierOverride.rawValue)")
                 return nil
             }
             bundleIdentifier = requestedBundleID
@@ -150,7 +155,8 @@ final class TrustedRequestFactory<
                 sessionID: sessionID,
                 configuration: config,
                 serverConfiguration: self.serverDrivenConfig,
-                userID: effectiveUserIdentifier
+                userID: effectiveUserIdentifier,
+                systemInfo: self.systemInfo
             )
         else {
             return nil
@@ -173,6 +179,7 @@ final class TrustedRequestFactory<
             attestationStore: self.attestationStore,
             attestationVerifier: self.attestationVerifier,
             rateLimiter: self.rateLimiter,
+            systemInfo: self.systemInfo,
             tokenProvider: self.tokenProvider,
             clock: self.clock,
             eventStreamContinuation: self.eventStreamContinuation
@@ -202,11 +209,21 @@ final class TrustedRequestFactory<
             defer {
                 if os_variant_allows_internal_security_policies(privateCloudComputeOsVariantSubsystem) {
                     self.metrics.withLock {
+                        // This business around the `metrics` value is here in support of
+                        // the `thtool request` scenarios. We remember the requests, and we
+                        // can show them later, and we are responsible for everything in
+                        // between. But this should go away. We've added use of the OSLog
+                        // logging to store requests, and we do that here too. But, since
+                        // we have not yet rewritten `thtool` we'll keep the old UI for now.
                         guard let metrics = $0.running.removeValue(forKey: serverRequestID) else {
                             return
                         }
 
                         let newMetadata = metrics.makeMetadata()
+
+                        // This is the "new" log, and everything after `logRequest` is the
+                        // old management stuff we want to remove.
+                        self.logRequest(newMetadata)
 
                         // if we had 5 before, remove the last one first
                         if $0.previous.count >= 5 {
@@ -240,7 +257,7 @@ final class TrustedRequestFactory<
             // If we are seeing this workload for the first time, kick off a prefetch so that we have cached attestations for this
             // workload if another request happens before the scheduled prefetches runs
             if prefetchNeeded {
-                self.logger.log("\(#function): need to prefetch attestations for this workload")
+                self.logger.log("need to prefetch attestations for this workload")
                 self.eventStreamContinuation.yield(.prefetchAttestationsForNewWorkload(parameters: parameters))
             }
 
@@ -257,6 +274,17 @@ final class TrustedRequestFactory<
             incomingUserDataReader: incomingUserDataReader,
             task: task
         )
+    }
+
+    private func logRequest(_ metadata: TC2TrustedRequestMetadata) {
+        let jsonEncoder = JSONEncoder()
+        jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? jsonEncoder.encode(TrustedRequestLogEntry(metadata)), let string = String(data: data, encoding: .utf8) {
+            let logger = tc2Logger(forCategory: .requestLog)
+            logger.log("\(string)")
+        } else {
+            self.logger.error("unable to encode and log request")
+        }
     }
 
     private func purgeRecentRequests() {

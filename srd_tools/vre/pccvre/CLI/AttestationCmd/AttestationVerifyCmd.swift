@@ -47,6 +47,10 @@ extension CLI.AttestationCmd {
         var transparencyProofValidation: Bool = true
 
         @Flag(inversion: .prefixedNo,
+              help: "ensembleTopologyValidation property of the validator.")
+        var ensembleTopologyValidation: Bool = true
+
+        @Flag(inversion: .prefixedNo,
               help: ArgumentHelp("requireProdFusing property of the validator.",
                                  visibility: .customerHidden)) // in research variant the chip is effectively prod-fused
         var requireProdFusing: Bool = true
@@ -73,6 +77,7 @@ extension CLI.AttestationCmd {
             validator.transparencyProofValidation = transparencyProofValidation
             validator.requireProdFusing = requireProdFusing
             validator.restrictDeveloperMode = restrictDeveloperMode
+            validator.ensembleTopologyValidation = ensembleTopologyValidation
 
             let keyData: PublicKeyData
             let keyExpiry: Date

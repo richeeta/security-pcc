@@ -41,9 +41,9 @@ final class Router8Hypercube: Router {
 	internal var expectedTxConnections: Int
 	internal var expectedRxConnections: Int
 	internal var transferMap: [Int: CIOTransferState]
-#if false
+	#if false
 	internal var routeMap: [Int: String]
-#endif
+	#endif
 	internal var cioMap: [Int: Int]
 
 	internal var ensembleNodes: [NodeState]
@@ -81,9 +81,9 @@ final class Router8Hypercube: Router {
 		self.expectedRxConnections = 7
 		self.expectedTxConnections = 7
 		self.transferMap = .init()
-#if false
+		#if false
 		self.routeMap = .init()
-#endif
+		#endif
 		self.cioMap = .init()
 		self.ensembleNodes = .init()
 		self.partnerNode = nil
@@ -223,9 +223,9 @@ final class Router8Hypercube: Router {
 				}
 			} else {
 				self.ensembleNodes[receiver].txEstablished = true
-#if false
+				#if false
 				self.routeMap[receiver] = "\(self.nodeRank)->\(receiver)"
-#endif
+				#endif
 			}
 		}
 
@@ -282,7 +282,7 @@ final class Router8Hypercube: Router {
 	}
 
 	func forwardMessage(_ forward: EnsembleControlMessage.Forward) {
-#if false
+		#if false
 		guard let routeToForwarder = routeMap[forward.forwarder] else {
 			logger.warning("""
 			Got a forwarding message: Forwarder:\(forward.forwarder)
@@ -296,7 +296,7 @@ final class Router8Hypercube: Router {
 		}
 
 		self.routeMap[forward.receiver] = routeToForwarder + "->\(forward.receiver)"
-#endif
+		#endif
 		self.ensembleNodes[forward.receiver].txEstablished = true
 	}
 
@@ -305,11 +305,11 @@ final class Router8Hypercube: Router {
 	}
 
 	func getRoutes() -> [Int: String] {
-#if false
+		#if false
 		self.routeMap
-#else
+		#else
 		return [:]
-#endif
+		#endif
 	}
 }
 

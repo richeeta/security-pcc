@@ -19,118 +19,116 @@
 //  Created by Andrea Guzzo on 11/28/23.
 //
 
-import OpenTelemetrySdk
-import os
+internal import CloudMetricsConstants
+import Foundation
+@preconcurrency package import OpenTelemetrySdk
+internal import os
 
-public class OpenTelemetryPeriodicMetricReader: StableMetricReader {
-    private class ResultWrapper {
-        var result: ExportResult
-        init() {
-            self.result = .failure
+/// Periodically reads metrics for a destination and sends them to an AsyncStream.Continuation.
+///
+/// Usually the other end of this continuation is connected to an exporter, who is responsible for
+/// sending all of the metrics (for all destinations) via gRPC.
+package final class OpenTelemetryPeriodicMetricReader: Sendable {
+
+    private enum State {
+        case stopped
+        case running
+        case shuttingDown
+    }
+
+    private let metricProducer: OSAllocatedUnfairLock<MetricProducer?> = .init(initialState: nil)
+    internal let store: OSAllocatedUnfairLock<OpenTelemetryStore?> = .init(initialState: nil)
+    private let destination: Configuration.Destination
+    private let metricContinuation: AsyncStream<(Configuration.Destination, [OpenTelemetrySdk.StableMetricData])>.Continuation
+
+    private let state: OSAllocatedUnfairLock<State> = .init(initialState: .stopped)
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "OTLPReader")
+
+
+    init(destination: Configuration.Destination,
+         metricContinuation: AsyncStream<(Configuration.Destination, [OpenTelemetrySdk.StableMetricData])>.Continuation) {
+        self.destination = destination
+        self.metricContinuation = metricContinuation
+    }
+
+    internal func run() async throws {
+        try self.state.withLock { state in
+            if state != .stopped {
+                throw CloudMetricsError.invalidStateTransition
+            }
+            state = .running
+        }
+        defer {
+            self.state.withLock { state in
+                state = .stopped
+            }
+        }
+        while (self.state.withLock { $0 == .running }) {
+            try Task.checkCancellation()
+            self.readMetrics()
+            try await Task.sleep(for: self.destination.publishInterval)
         }
     }
-    internal var metricProduce: MetricProducer?
-    private var pollingTask: Task<Void, Never>?
-    internal var store: OpenTelemetryStore?
-    internal let exporter: StableMetricExporter
-    internal let exportInterval: TimeInterval
-    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "OTLPReader")
-    private var publishTimer: DispatchSourceTimer?
-    internal typealias OpenTelemetryPublishCallback = () async -> Void
-    internal typealias OpenTelemetryPublishContinuation  = AsyncStream<OpenTelemetryPublishCallback>.Continuation
-    internal let eventStream: AsyncStream<OpenTelemetryPublishCallback>
-    internal var eventContinuation: OpenTelemetryPublishContinuation
 
-    public init(exporter: StableMetricExporter, exportInterval: TimeInterval = 60.0) {
-        self.exporter = exporter
-        self.exportInterval = exportInterval
-        var continuation: OpenTelemetryPublishContinuation! = nil
-        self.eventStream = AsyncStream<OpenTelemetryPublishCallback> { continuation = $0 }
-        self.eventContinuation = continuation
+    private func readMetrics() {
+        guard let metricProducer = (self.metricProducer.withLock { $0 }) else {
+            logger.error("No metric producer for destination \(self.destination)")
+            return
+        }
+        let store = self.store.withLock { $0 }
+        guard let metricData = store?.collectAllMetrics(producer: metricProducer) else {
+            logger.error("No metric data for destination \(self.destination)")
+            return
+        }
+        guard !metricData.isEmpty else {
+            // Only log where we're running with an exportInterval that resembles prod.
+            // If exportInterval is low, we're probably running tests and don't want to
+            // completely flood our logger.
+            if self.destination.publishInterval > .seconds(10) {
+                logger.log("Metric data are empty for destination \(self.destination)")
+            }
+            return
+        }
+        metricContinuation.yield((destination, metricData))
+    }
+}
+
+extension OpenTelemetryPeriodicMetricReader: StableMetricReader {
+    package func getAggregationTemporality(for instrument: OpenTelemetrySdk.InstrumentType) -> OpenTelemetrySdk.AggregationTemporality {
+        .delta
     }
 
-    public func register(registration: CollectionRegistration) {
+    package func getDefaultAggregation(for instrument: OpenTelemetrySdk.InstrumentType) -> any OpenTelemetrySdk.Aggregation {
+        Aggregations.defaultAggregation()
+    }
+
+
+    package func shutdown() -> OpenTelemetrySdk.ExportResult {
+        do {
+            try self.state.withLock { state in
+                if state != .running {
+                    throw CloudMetricsError.invalidStateTransition
+                }
+                state = .shuttingDown
+            }
+        } catch {
+            // Can't throw here
+            logger.error("invalid OpenTelemetryPeriodMetricReader state transition to begin shutdown")
+        }
+        return self.forceFlush()
+    }
+
+    package func forceFlush() -> ExportResult {
+        readMetrics()
+        return .success
+    }
+
+    package func register(registration: CollectionRegistration) {
         if let newProducer = registration as? MetricProducer {
-            metricProduce = newProducer
-            start()
+            metricProducer.withLock { $0 = newProducer }
         } else {
             logger.error("Unrecognized CollectionRegistration")
         }
     }
 
-    internal func start() {
-        assert(self.pollingTask == nil)
-        let exportInterval: DispatchTimeInterval = .seconds(Int(self.exportInterval))
-        let timer = DispatchSource.makeTimerSource()
-        let continuation = self.eventContinuation
-        timer.setEventHandler { [weak self] in
-            if let _ = self {
-                continuation.yield {
-                    if !timer.isCancelled {
-                        _ = await self?.doRun()
-                    }
-                }
-            }
-        }
-        timer.schedule(deadline: .now() + exportInterval, repeating: exportInterval)
-        timer.activate()
-        self.publishTimer = timer
-        let eventStream = self.eventStream
-        self.pollingTask = Task(priority: .high) {
-            for await callback in eventStream {
-                await callback()
-            }
-        }
-    }
-
-    public func forceFlush() -> ExportResult {
-        let dispatchGroup = DispatchGroup()
-        dispatchGroup.enter()
-        let wrapper = ResultWrapper()
-        Task {
-            wrapper.result = await doRun()
-            dispatchGroup.leave()
-        }
-        _ = dispatchGroup.wait(timeout: .now() + .seconds(5))
-        return wrapper.result
-    }
-
-    private func doRun() async -> ExportResult {
-        guard let metricProduce = metricProduce else {
-            logger.error("No metric producer!")
-            return  .failure
-        }
-        guard let metricData = await store?.collectAllMetrics(producer: metricProduce) else {
-            logger.error("No metric data!")
-            return .failure
-        }
-        if metricData.isEmpty {
-            return .success
-        }
-        return exporter.export(metrics: metricData)
-    }
-
-    public func shutdown() -> ExportResult {
-        if let pollingTask = self.pollingTask {
-            pollingTask.cancel()
-            self.pollingTask = nil
-        }
-        if let timer = self.publishTimer {
-            timer.cancel()
-            self.publishTimer = nil
-        }
-        return exporter.shutdown()
-    }
-
-    public func getAggregationTemporality(for instrument: InstrumentType) -> AggregationTemporality {
-        exporter.getAggregationTemporality(for: instrument)
-    }
-
-    public func getDefaultAggregation(for instrument: InstrumentType) -> Aggregation {
-        exporter.getDefaultAggregation(for: instrument)
-    }
-
-    deinit {
-      _ = shutdown()
-    }
 }

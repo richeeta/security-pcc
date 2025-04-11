@@ -32,7 +32,7 @@ protocol TC2Sandbox {
 extension TC2Sandbox {
     #if os(macOS)
     static var sandboxParameters: [String: String] {
-        let logger = tc2Logger(forCategory: .Sandbox)
+        let logger = tc2Logger(forCategory: .sandbox)
 
         let homeDirectory: String
         if let home = NSHomeDirectory().realpath {
@@ -43,36 +43,26 @@ extension TC2Sandbox {
         }
 
         guard let tempDirectory = Self.confstr(_CS_DARWIN_USER_TEMP_DIR)?.realpath else {
-            logger.error("Unable to read _CS_DARWIN_USER_TEMP_DIR!")
-            exit(EXIT_FAILURE)
+            fatalError("Unable to read _CS_DARWIN_USER_TEMP_DIR")
         }
 
         guard let cacheDirectory = Self.confstr(_CS_DARWIN_USER_CACHE_DIR)?.realpath else {
-            logger.error("Unable to read _CS_DARWIN_USER_CACHE_DIR!")
-            exit(EXIT_FAILURE)
+            fatalError("Unable to read _CS_DARWIN_USER_CACHE_DIR")
         }
 
         return [
             "HOME": homeDirectory,
-            "TMPDIR": tempDirectory,
-            "DARWIN_CACHE_DIR": cacheDirectory,
+            "DARWIN_USER_TEMP_DIR": tempDirectory,
+            "DARWIN_USER_CACHE_DIR": cacheDirectory,
         ]
     }
 
     static func flatten(_ dictionary: [String: String]) -> [String] {
-        var result: [String] = []
-        dictionary.keys.forEach { key in
-            guard let value = dictionary[key] else {
-                return
-            }
-            result.append(key)
-            result.append(value)
-        }
-        return result
+        return dictionary.flatMap { [$0, $1] }
     }
 
     private static func _sandboxInit(profile: String, parameters: [String: String]) {
-        let logger = tc2Logger(forCategory: .Sandbox)
+        let logger = tc2Logger(forCategory: .sandbox)
 
         var sbError: UnsafeMutablePointer<Int8>?
         let flatParameters = flatten(parameters)
@@ -81,12 +71,9 @@ extension TC2Sandbox {
             let result = sandbox_init_with_parameters(profile, UInt64(SANDBOX_NAMED), ptr, &sbError)
             guard result == 0 else {
                 guard let sbError = sbError else {
-                    logger.error("sandbox_init_with_parameters failed: (no error)")
-                    exit(EXIT_FAILURE)
+                    fatalError("sandbox_init_with_parameters failed: (no error)")
                 }
-
-                logger.error("sandbox_init_with_parameters failed: [\(String(cString: sbError))]")
-                exit(EXIT_FAILURE)
+                fatalError("sandbox_init_with_parameters failed: [\(String(cString: sbError))]")
             }
         }
 
@@ -97,7 +84,11 @@ extension TC2Sandbox {
     static func withArrayOfCStrings<R>(_ args: [String], _ body: ([UnsafePointer<CChar>?]) -> R) -> R {
         let mutableStrings = args.map { strdup($0) }
         var cStrings = mutableStrings.map { UnsafePointer($0) }
-        defer { mutableStrings.forEach { free($0) } }
+        defer {
+            for mutableString in mutableStrings {
+                free(mutableString)
+            }
+        }
         cStrings.append(nil)
         return body(cStrings)
     }
@@ -123,19 +114,16 @@ extension TC2Sandbox {
     }
 
     static func enterSandbox(identifier: String, macOSProfile: String) {
-        let logger = tc2Logger(forCategory: .Sandbox)
+        let logger = tc2Logger(forCategory: .sandbox)
 
         // Set user dir (tmp) suffix on both iOS and macOS
-
         guard _set_user_dir_suffix(identifier) else {
-            logger.error("_set_user_dir_suffix() failed")
-            exit(EXIT_FAILURE)
+            fatalError("_set_user_dir_suffix() failed")
         }
 
         // call confstr to initialize the directory and env var on all platforms
-        guard (Self.confstr(_CS_DARWIN_USER_TEMP_DIR)?.realpath) != nil else {
-            logger.error("Unable to read _CS_DARWIN_USER_CACHE_DIR \(_CS_DARWIN_USER_TEMP_DIR)")
-            exit(EXIT_FAILURE)
+        guard Self.confstr(_CS_DARWIN_USER_TEMP_DIR) != nil else {
+            fatalError("Unable to read _CS_DARWIN_USER_TEMP_DIR")
         }
 
         // On macOS, we own the profile and initialize it ourselves.

@@ -32,6 +32,7 @@ extension TC2Daemon {
                     rateLimiter: self.rateLimiter,
                     requestID: .init(),
                     config: self.config,
+                    systemInfo: systemInfo,
                     bundleIdentifier: bundleIdentifier,
                     featureIdentifier: featureIdentifier)
                 try await request.sendRequest()

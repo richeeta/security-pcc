@@ -81,7 +81,7 @@ let kKnoxURLScheme = "knox"
 /// Convenience constant: ``knoxURLScheme`` + "://"
 let kKnoxURLPrefix = "\(kKnoxURLScheme)://"
 
-let kDefaultKnoxURL = URL(string:"https://knox.example.com")!
+let kDefaultKnoxURL = URL(string:"https://knox.sd.apple.com")!
 
 let kAppleArchiveExtension = "aar"
 

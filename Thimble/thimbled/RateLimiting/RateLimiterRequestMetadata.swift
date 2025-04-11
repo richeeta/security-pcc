@@ -47,7 +47,7 @@ struct RateLimiterRequestMetadata: Sendable, Equatable, Hashable, Codable {
     init(metadata: TC2TrustedRequestMetadata) {
         self.bundleID = metadata.bundleIdentifier
         self.featureID = metadata.featureIdentifier ?? ""
-        self.workloadType = metadata.parameters.pipelineKind
-        self.workloadTags = metadata.parameters.pipelineArguments
+        self.workloadType = metadata.workloadName
+        self.workloadTags = metadata.workloadParameters
     }
 }

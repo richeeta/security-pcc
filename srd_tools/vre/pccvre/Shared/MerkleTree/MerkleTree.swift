@@ -35,7 +35,7 @@ struct MerkleTree<Hash: HashFunction>: Sendable {
 
     init(using: Hash.Type = SHA256.self) {}
 
-    init(_ elements: some Sequence<DataProtocol>, using: Hash.Type = SHA256.self) {
+    init(_ elements: some Sequence<some DataProtocol>, using: Hash.Type = SHA256.self) {
         self = .init(using: using)
         for element in elements {
             self.append(Data(element))

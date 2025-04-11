@@ -32,12 +32,7 @@ internal enum CloudBoardControllerAPIXPCClientToServerMessage {
         internal var status: WorkloadControllerStatus
     }
 
-    internal struct StartAcceptingRequests: CloudBoardAsyncXPCMessage {
-        internal typealias Success = ExplicitSuccess
-        internal typealias Failure = CloudBoardControllerAPIError
-    }
-
-    internal struct StopAcceptingRequests: CloudBoardAsyncXPCMessage {
+    internal struct RestartPrewarmedInstances: CloudBoardAsyncXPCMessage {
         internal typealias Success = ExplicitSuccess
         internal typealias Failure = CloudBoardControllerAPIError
     }

@@ -38,7 +38,7 @@ enum LibSecureConfig {
 										 securityPolicy: securityPolicy)
 
 		let attestedConfig = attestedConfig(config)
-		let attestedConfigJson = try attestedConfig.jsonString(prettyPrinted: false)
+        let attestedConfigJson = try attestedConfig.jsonString(prettyPrinted: false, redactCredentialStrings: false)
 		let attestedConfigData = attestedConfigJson.data(using: .utf8)
 		let secureConfigError = shim_register_config(attestedConfigData)
 		guard secureConfigError == 0 else {

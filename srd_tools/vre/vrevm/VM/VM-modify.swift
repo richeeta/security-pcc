@@ -80,7 +80,6 @@ extension VM {
         }
 
         VM.logger.log("modify completed")
-        self.vmConfig = vmConfig
     }
 
     // copyROMs copies in iBoot (avpbooter) and/or vSEP (avpsepbooter) (or neither) and updates their

@@ -27,8 +27,8 @@ import PrometheusParser
 import ArgumentParser
 
 @main
-public struct CloudMetricsdTestCommand: AsyncParsableCommand {
-    public static var configuration = CommandConfiguration(
+package struct CloudMetricsdTestCommand: AsyncParsableCommand {
+    package static let configuration = CommandConfiguration(
         commandName: "cloudmetricstest",
         abstract: "Test tool for CloudMetrics",
         discussion: """
@@ -53,7 +53,7 @@ public struct CloudMetricsdTestCommand: AsyncParsableCommand {
     @Option(help: "")
     internal var continousHistogram: String?
 
-    public init() {}
+    package init() {}
 
     internal static func relayPrometheusMetrics(filepath: String) throws {
         let content = try String(contentsOfFile: filepath, encoding: .utf8)
@@ -61,7 +61,7 @@ public struct CloudMetricsdTestCommand: AsyncParsableCommand {
         print("Completed")
     }
 
-    public func run() async throws {
+    package func run() async throws {
         // Setup the CloudMetrics backend.
         CloudMetrics.bootstrap()
         if let prometheusDataFile = self.prometheusData {
@@ -115,7 +115,5 @@ public struct CloudMetricsdTestCommand: AsyncParsableCommand {
         let histogram = try Histogram(label: "exampleHistogram",
                                       dimensions: [("dim1", "val1"), ("dim2", "val2")],
                                       buckets: [0.5, 9.5, 25.0, 50.0, 75.0, 90.0])
-        print("Setting histogram bucket values")
-        histogram.record(bucketValues: [0, 8, 1, 5, 3, 4], sum: 34, count: 6)
     }
 }

@@ -19,10 +19,10 @@
 //  Created by Andrea Guzzo on 11/29/23.
 //
 
-import OpenTelemetrySdk
+package import OpenTelemetrySdk
 
-extension StableMetricData.Data: @retroactive CustomStringConvertible {
-    public var description: String {
+extension StableMetricData.Data {
+    package var description: String {
         switch self {
         case let data as StableSumData:
             return "Sum{points='\(data.points)', aggregationTemporality='\(data.aggregationTemporality)'"
@@ -38,20 +38,20 @@ extension StableMetricData.Data: @retroactive CustomStringConvertible {
     }
 }
 
-extension LongPointData: @retroactive CustomStringConvertible {
-    public var description: String {
+extension LongPointData {
+    package var description: String {
         "{ attributes='\(self.attributes)', value='\(self.value)' }"
     }
 }
 
-extension DoublePointData: @retroactive CustomStringConvertible {
-    public var description: String {
+extension DoublePointData {
+    package var description: String {
         "{ attributes='\(self.attributes)', value='\(self.value)' }"
     }
 }
 
-extension HistogramPointData: @retroactive CustomStringConvertible {
-    public var description: String {
+extension HistogramPointData {
+    package var description: String {
         """
         { attributes='\(self.attributes)', \
         sum='\(self.sum)', \
@@ -66,8 +66,8 @@ extension HistogramPointData: @retroactive CustomStringConvertible {
     }
 }
 
-extension SummaryPointData: @retroactive CustomStringConvertible {
-    public var description: String {
+extension SummaryPointData {
+    package var description: String {
         """
         { attributes='\(self.attributes)', \
         sum='\(self.sum)', \

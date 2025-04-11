@@ -19,16 +19,15 @@
 //  Created by Marco Magdy on 5/25/23.
 //
 
-import CoreAnalytics
+internal import CloudMetricsConstants
+private import CoreAnalytics
 import Foundation
-import os
-@_weakLinked import OSASubmissionClient
+internal import os
+@_weakLinked private import OSASubmissionClient
 
 internal final class CoreAnalyticsActivity: NSObject, Sendable {
-    private let logger: Logger
-    override internal init() {
-        self.logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CoreAnalyticsActivity")
-    }
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CoreAnalyticsActivity")
+    override internal init() {}
 
     internal func registerActivity() {
         if #_hasSymbol(OSASubmissionClient.self) {
@@ -36,23 +35,23 @@ internal final class CoreAnalyticsActivity: NSObject, Sendable {
                 let state = xpc_activity_get_state(activity)
                 switch state {
                 case XPC_ACTIVITY_STATE_CHECK_IN:
-                    self.logger.info("CoreAnalyticsActivity state: CHECK_IN")
+                    self.logger.log("CoreAnalyticsActivity state: CHECK_IN")
                     return
                 case XPC_ACTIVITY_STATE_RUN:
-                    self.logger.info("CoreAnalyticsActivity state: RUN")
+                    self.logger.log("CoreAnalyticsActivity state: RUN")
                     self.runInternal(activity: activity)
                 default:
-                    self.logger.info("Unexpected CoreAnalyticsActivity state:\(state, privacy: .public)")
+                    self.logger.log("Unexpected CoreAnalyticsActivity state:\(state, privacy: .public)")
                 }
             }
         } else {
-            self.logger.info("OSASubmissionClient not available, skipping CoreAnalyticsActivity registration")
+            self.logger.log("OSASubmissionClient not available, skipping CoreAnalyticsActivity registration")
         }
     }
 
     private func runInternal(activity: xpc_activity_t) {
         if xpc_activity_should_defer(activity) {
-            self.logger.info("deferring running core-analytics flush activity")
+            self.logger.log("deferring running core-analytics flush activity")
             if xpc_activity_set_state(activity, XPC_ACTIVITY_STATE_DEFER) == false {
                 self.logger.error("Failed to set state to XPC_ACTIVITY_STATE_DEFER")
             }

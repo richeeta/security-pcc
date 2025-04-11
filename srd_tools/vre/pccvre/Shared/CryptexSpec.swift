@@ -24,13 +24,15 @@ struct CryptexSpec: CustomStringConvertible {
     let variant: String
     let path: FilePath
     let assetType: String?
+    let fileType: AssetHelper.FileType
 
     var description: String { "\(variant):\(path.lastComponent ?? "-")" }
 
     init(
         path: String,
         variant: String,
-        assetType: String? = nil
+        assetType: String? = nil,
+        fileType: AssetHelper.FileType? = nil
     ) throws {
         guard FileManager.isExist(path, resolve: true) else {
             throw POSIXError(.ENOENT)
@@ -42,14 +44,10 @@ struct CryptexSpec: CustomStringConvertible {
         self.path = FilePath(path)
         self.variant = variant
         self.assetType = assetType
-    }
-
-    func toDictionary() -> [String: String] {
-        var dictionary = [String: String]()
-        dictionary["variant"] = variant
-        dictionary["url"] = path.lastComponent?.string
-        dictionary["type"] = assetType
-
-        return dictionary
+        if let fileType {
+            self.fileType = fileType
+        } else {
+            self.fileType = try AssetHelper.fileType(FileManager.fileURL(path))
+        }
     }
 }

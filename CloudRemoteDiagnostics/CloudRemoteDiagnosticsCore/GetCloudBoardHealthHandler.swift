@@ -35,14 +35,26 @@ extension CloudRemoteDiagnosticsHandler {
         completion: @escaping ((String) -> Void)) {
         Task.detached {
             let healthState: CloudBoardHealthState
+            var done: Bool = false
+
             let healthMonitor = CloudBoardHealthMonitor()
+            // Ignore any state change from CloudBoard since we will just
+            // request the state explicitly.
+            await healthMonitor.onHealthStateChange { _ in }
+            await healthMonitor.onDisconnect {
+                if done == false {
+                    log.error("Unexpected disconnect from CloudBoard")
+                }
+            }
             await healthMonitor.connect()
+
             do {
                 healthState = try await healthMonitor.getHealthState()
             } catch {
                 healthState = .unknown
                 log.error("Unable to get CloudBoard health: \(error)")
             }
+            done = true
             await healthMonitor.disconnect()
 
             let result = [

@@ -52,9 +52,9 @@ extension CloudBoardJobHelperAPIXPCServer {
 }
 
 extension CloudBoardJobHelperAPIXPCServer: CloudBoardJobHelperAPIServerToClientProtocol {
-    public func sendWorkloadResponse(_ response: WorkloadResponse) async throws {
+    public func sendWorkloadResponse(_ response: JobHelperToCloudBoardDaemonMessage) async throws {
         try await self.listener.broadcast(
-            CloudBoardJobHelperAPIXPCServerToClientMessages.WorkloadResponse(response: response)
+            CloudBoardJobHelperAPIXPCServerToClientMessages.WorkloadResponse(message: response)
         )
     }
 }
@@ -73,7 +73,7 @@ extension CloudBoardJobHelperAPIXPCServer: CloudBoardJobHelperAPIServerProtocol 
             Self.logger.debug("Received InvokeWorkload XPC message")
             let delegate = try await self.ensureDelegate()
             do {
-                try await delegate.invokeWorkloadRequest(request.request)
+                try await delegate.invokeWorkloadRequest(request.message)
             } catch let error as CloudBoardJobHelperAPIXPCClientToServerMessages.InvokeWorkload.Failure {
                 throw error
             } catch {
@@ -87,10 +87,23 @@ extension CloudBoardJobHelperAPIXPCServer: CloudBoardJobHelperAPIServerProtocol 
             let delegate = try await self.ensureDelegate()
             do {
                 try await delegate.teardown()
-            } catch let error as CloudBoardJobHelperAPIXPCClientToServerMessages.InvokeWorkload.Failure {
+            } catch let error as CloudBoardJobHelperAPIXPCClientToServerMessages.Teardown.Failure {
                 throw error
             } catch {
-                throw CloudBoardJobHelperAPIXPCClientToServerMessages.InvokeWorkload.Failure
+                throw CloudBoardJobHelperAPIXPCClientToServerMessages.Teardown.Failure
+                    .unexpectedReportableError(String(reportable: error))
+            }
+            return ExplicitSuccess()
+        }
+        handlers.register(CloudBoardJobHelperAPIXPCClientToServerMessages.Abandon.self) { _ in
+            Self.logger.debug("Received Abandon XPC message")
+            let delegate = try await self.ensureDelegate()
+            do {
+                try await delegate.abandon()
+            } catch let error as CloudBoardJobHelperAPIXPCClientToServerMessages.Abandon.Failure {
+                throw error
+            } catch {
+                throw CloudBoardJobHelperAPIXPCClientToServerMessages.Abandon.Failure
                     .unexpectedReportableError(String(reportable: error))
             }
             return ExplicitSuccess()

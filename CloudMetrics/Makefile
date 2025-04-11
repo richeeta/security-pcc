@@ -5,6 +5,10 @@ REPO_ROOT ?= $(shell git rev-parse --show-toplevel)
 BUILD_DIR := ${REPO_ROOT}/build
 ROOTS_DIR := ${BUILD_DIR}/roots
 
+ABI_DERIVED_DATA := ${REPO_ROOT}/.ABI_DerivedData
+ABI_BASELINES_DIR := ${REPO_ROOT}/ABI_Baselines
+ABI_COLLECTION_SCRIPT := ${REPO_ROOT}/SupportingFiles/Scripts/ABICollection.sh
+
 .default: help
 .PHONY: help
 help:
@@ -16,6 +20,8 @@ help:
 	@echo "-------- utilities ---------------------------------------------------"
 	@echo "defang:  disables code signing requirements for local development"
 	@echo "refang:  renables standard code signing requirements"
+	@echo "-------- abi breakage checker ----------------------------------------"
+	@echo "abi:     regenerate ABI baseline files"
 
 # roots ------------------------------------------------------------------------
 .PHONY: lint
@@ -74,3 +80,20 @@ buildit: clean
 	@sudo xbs buildit . \
 		-release SilverLining \
 		-project CloudMetrics
+	@rm -rf ${ABI_DERIVED_DATA}	
+
+.PHONY: abi
+abi:
+	@echo "Building abi schema..."
+	@xcodebuild \
+		-project CloudMetrics.xcodeproj \
+		-scheme abi \
+		-destination generic/platform=iOS \
+		-destination generic/platform=macOS \
+		-derivedDataPath ${ABI_DERIVED_DATA} \
+		RUN_SWIFT_ABI_CHECKER_TOOL=NO
+	@${ABI_COLLECTION_SCRIPT} ${ABI_DERIVED_DATA} ${ABI_BASELINES_DIR}
+
+.PHONY: protos
+protos:
+	protoc Tests/FakeOTLPServer/Protos/*.proto --grpc-swift_out=. --swift_out=. --grpc-swift_opt=Client=false

@@ -24,33 +24,38 @@ import Foundation_Private.NSBackgroundActivityScheduler
 import OSLog
 import PrivateCloudCompute
 
-final class TC2PrefetchActivity: Sendable, TC2Schedulable {
+final class TC2PrefetchActivity<
+    SystemInfo: SystemInfoProtocol
+>: Sendable, TC2Schedulable {
     let config: TC2Configuration
-    let logger = tc2Logger(forCategory: .PrefetchRequest)
+    let logger = tc2Logger(forCategory: .prefetchRequest)
     let parametersCache: TC2RequestParametersLRUCache
     let rateLimiter: RateLimiter
     let attestationStore: TC2AttestationStore?
-    let attestationVerifer: TC2CloudAttestationVerifier
+    let attestationVerifier: TC2CloudAttestationVerifier
     let eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation
     let serverDrivenConfig: TC2ServerDrivenConfiguration
+    let systemInfo: SystemInfo
     let prefetchTracker: TC2PrefetchTracker
 
     init(
         rateLimiter: RateLimiter,
         attestationStore: TC2AttestationStore?,
-        attestationVerifer: TC2CloudAttestationVerifier,
+        attestationVerifier: TC2CloudAttestationVerifier,
         config: TC2Configuration,
         daemonDirectoryPath: URL,
         serverDrivenConfig: TC2ServerDrivenConfiguration,
+        systemInfo: SystemInfo,
         eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation,
         prefetchTracker: TC2PrefetchTracker
     ) {
         self.rateLimiter = rateLimiter
         self.attestationStore = attestationStore
-        self.attestationVerifer = attestationVerifer
+        self.attestationVerifier = attestationVerifier
         self.config = config
         self.eventStreamContinuation = eventStreamContinuation
         self.serverDrivenConfig = serverDrivenConfig
+        self.systemInfo = systemInfo
 
         let maxCount = serverDrivenConfig.maxPrefetchWorkloadCount ?? 20
         let maxAge = serverDrivenConfig.maxPrefetchWorkloadAgeSeconds ?? (60 * 60 * 24 * 30)
@@ -62,7 +67,7 @@ final class TC2PrefetchActivity: Sendable, TC2Schedulable {
     }
 
     func performScheduledWork() async {
-        logger.log("\(#function): running TC2PrefetchActivity")
+        logger.log("running TC2PrefetchActivity")
 
         guard let attestationStore = self.attestationStore else {
             return
@@ -72,15 +77,16 @@ final class TC2PrefetchActivity: Sendable, TC2Schedulable {
 
         for parameters in cachedParameters {
             do {
-                logger.log("\(#function) fetching attestations for pipeline: \(parameters.pipelineKind) args: \(parameters.pipelineArguments)")
+                logger.log("fetching attestations for pipeline: \(parameters.pipelineKind) args: \(parameters.pipelineArguments)")
                 try await self.prefetchTracker.ensuringOnlyASinglePrefetchIsRunningForParameters(parameters) {
                     let prefetchRequest = TC2BatchedPrefetch(
                         connectionFactory: NWAsyncConnection(),
                         attestationStore: attestationStore,
                         rateLimiter: self.rateLimiter,
-                        attestationVerifier: self.attestationVerifer,
+                        attestationVerifier: self.attestationVerifier,
                         config: self.config,
                         serverDrivenConfig: self.serverDrivenConfig,
+                        systemInfo: systemInfo,
                         parameters: parameters,
                         eventStreamContinuation: self.eventStreamContinuation,
                         prewarm: false,

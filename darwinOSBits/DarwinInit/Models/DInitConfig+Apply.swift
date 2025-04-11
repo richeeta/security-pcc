@@ -441,7 +441,7 @@ extension DInitCryptexConfig {
         // If cryptex url has knox:// scheme, handle this special case
         if url.scheme == kKnoxURLScheme {
             // Download the raw, encrypted cryptex from Knox
-            guard let encrypted = await KnoxClientWrapper.downloadRaw(at: url, to: destinationDirectory, dawToken: dawToken, wgUsername: wgUsername, wgToken: wgToken, altCDN: alternateCDNHost, background: backgroundTrafficClass, retries: networkRetryCount) else {
+            guard let encrypted = await KnoxClientWrapper.downloadRaw(at: url, to: destinationDirectory, dawToken: dawToken?.string, wgUsername: wgUsername, wgToken: wgToken?.string, altCDN: alternateCDNHost, background: backgroundTrafficClass, retries: networkRetryCount) else {
                 return nil
             }
 
@@ -480,9 +480,9 @@ extension DInitCryptexConfig {
             guard let extracted = await LibCryptex.extractCryptex(
                 at: path,
                 url: config.url,
-                dawToken: config.dawToken,
+                dawToken: config.dawToken?.string,
                 wgUsername: config.wgUsername,
-                wgToken: config.wgToken,
+                wgToken: config.wgToken?.string,
                 altCDN: config.alternateCDNHost,
                 retries: config.networkRetryCount,
                 aeaDecryptionParams: config.aeaDecryptionParams) else {

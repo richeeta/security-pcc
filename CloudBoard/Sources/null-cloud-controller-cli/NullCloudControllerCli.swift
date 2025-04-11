@@ -14,14 +14,17 @@
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
-import ArgumentParser
+import ArgumentParserInternal
 import CloudBoardController
 import NullCloudControllerAPI
 
 @main
 struct NullCloudControllerCli: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        subcommands: [UpdateState.self]
+        subcommands: [
+            UpdateState.self,
+            RestartPrewarmedInstances.self,
+        ]
     )
 }
 
@@ -34,6 +37,13 @@ extension NullCloudControllerCli {
             let xpcClient = await NullCloudControllerAPIXPCClient()
             let response = try await xpcClient.updateState(state: .init(from: self.state))
             print(response)
+        }
+    }
+
+    struct RestartPrewarmedInstances: AsyncParsableCommand {
+        func run() async throws {
+            let xpcClient = await NullCloudControllerAPIXPCClient()
+            try await xpcClient.restartPrewarmedInstances()
         }
     }
 }

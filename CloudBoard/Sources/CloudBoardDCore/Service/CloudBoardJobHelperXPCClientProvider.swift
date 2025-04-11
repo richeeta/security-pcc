@@ -21,21 +21,21 @@ import CloudBoardMetrics
 import os
 
 actor CloudBoardJobHelperXPCClientProvider: CloudBoardJobHelperClientProvider {
-    let instanceManager: RequestFielderManager
+    let instanceProvider: JobHelperInstanceProvider
 
     public static let log: Logger = .init(
         subsystem: "com.apple.cloudos.cloudboard",
         category: "CloudBoardJobHelperXPCClientProvider"
     )
 
-    init(instanceManager: RequestFielderManager) throws {
-        self.instanceManager = instanceManager
+    init(instanceProvider: JobHelperInstanceProvider) throws {
+        self.instanceProvider = instanceProvider
     }
 
     func withClient<ReturnValue>(
         delegate: CloudBoardJobHelperAPIClientDelegateProtocol,
         _ body: (CloudBoardJobHelperInstanceProtocol) async throws -> ReturnValue
     ) async throws -> ReturnValue {
-        return try await self.instanceManager.withRequestFielder(delegate: delegate, body)
+        return try await self.instanceProvider.withJobHelperInstance(delegate: delegate, body)
     }
 }

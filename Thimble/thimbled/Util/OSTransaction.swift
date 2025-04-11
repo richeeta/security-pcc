@@ -22,13 +22,12 @@
 import OSPrivate.os.transactionPrivate
 
 func withOSTransaction<R>(name: String, body: () async throws -> R) async rethrows -> R {
-    var transaction: (any NSObjectProtocol)!
-    transaction = os_transaction_create(name)
+    let transaction = os_transaction_create(name)
     defer {
         // we must ensure the transactions stays in memory!
         // releasing the transaction means we are done and the
         // daemon can be marked as clean/inactive again.
-        precondition(isKnownUniquelyReferenced(&transaction))
+        withExtendedLifetime(transaction) {}
     }
     return try await body()
 }

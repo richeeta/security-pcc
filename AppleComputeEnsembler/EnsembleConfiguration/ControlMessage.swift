@@ -50,27 +50,25 @@ enum EnsembleControlMessage: Codable, CustomStringConvertible {
 
 	// EnsembleControlMessage.description does not expose any private data.
 	var description: String {
-		get {
-			switch self {
-			case .ForwardMessage(let forward): return ".ForwardMessage(\(forward))"
-			case .announceNode: return ".announceNode"
-			case .acceptNode: return ".acceptNode"
-			case .ensembleComplete: return ".ensembleComplete"
-			case .pairNode(_): return ".pairNode(followerAttestation: %s)"
-			case .completePairing(_, _, _): return """
-				.completePairing(leaderAttestation: %s, pairingData: %s, plainText: %s)
-				"""
-			case .announceSharedKey(_): return ".announceSharedKey(encryptedText: %s)"
-			case .acceptSharedKey: return ".acceptSharedKey"
-			case .ensembleSecureComplete: return ".ensembleSecureComplete"
-			case .ensembleFailed: return ".ensembleFailed"
-			case .ensembleDraining: return ".ensembleDraining"
-			case .testMessage: return ".testMessage"
-			case .bigMessageStart(let size): return ".bigMessageStart(size: \(size)"
-			case .bigMessageChunk(_): return ".bigMessageChunk(data: %s)"
-			case .bigMessageEnd: return ".bigMessageEnd"
-			case .rotateKey: return ".rotateKey"
-			}
+		switch self {
+		case .ForwardMessage(let forward): return ".ForwardMessage(\(forward))"
+		case .announceNode: return ".announceNode"
+		case .acceptNode: return ".acceptNode"
+		case .ensembleComplete: return ".ensembleComplete"
+		case .pairNode: return ".pairNode(followerAttestation: %s)"
+		case .completePairing: return """
+			.completePairing(leaderAttestation: %s, pairingData: %s, plainText: %s)
+			"""
+		case .announceSharedKey: return ".announceSharedKey(encryptedText: %s)"
+		case .acceptSharedKey: return ".acceptSharedKey"
+		case .ensembleSecureComplete: return ".ensembleSecureComplete"
+		case .ensembleFailed: return ".ensembleFailed"
+		case .ensembleDraining: return ".ensembleDraining"
+		case .testMessage: return ".testMessage"
+		case .bigMessageStart(let size): return ".bigMessageStart(size: \(size)"
+		case .bigMessageChunk: return ".bigMessageChunk(data: %s)"
+		case .bigMessageEnd: return ".bigMessageEnd"
+		case .rotateKey: return ".rotateKey"
 		}
 	}
 
@@ -80,9 +78,7 @@ enum EnsembleControlMessage: Codable, CustomStringConvertible {
 		internal let chassisID: String
 
 		var description: String {
-			get {
-				return "OuterNode(nodeID: \(self.nodeID), chassisID: \(self.chassisID))"
-			}
+			return "OuterNode(nodeID: \(self.nodeID), chassisID: \(self.chassisID))"
 		}
 	}
 
@@ -92,9 +88,7 @@ enum EnsembleControlMessage: Codable, CustomStringConvertible {
 		internal let receiver: Int
 
 		var description: String {
-			get {
-				return "Forward(forwarder: \(self.forwarder), receiver: \(self.receiver))"
-			}
+			return "Forward(forwarder: \(self.forwarder), receiver: \(self.receiver))"
 		}
 	}
 }

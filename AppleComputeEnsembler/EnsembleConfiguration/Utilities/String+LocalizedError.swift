@@ -26,8 +26,6 @@ extension String: LocalizedError, ReportableString {
 	public var errorDescription: String? { self }
 
 	public var publicDescription: String {
-		get {
-			return String(describing: errorDescription)
-		}
+		return String(describing: self.errorDescription)
 	}
 }

@@ -15,6 +15,7 @@
 //  Copyright © 2023 Apple Inc. All rights reserved.
 
 import CloudBoardCommon
+import CloudBoardController
 import CloudBoardMetrics
 import CloudBoardPlatformUtilities
 import Foundation
@@ -57,11 +58,11 @@ final class ServiceDiscoveryPublisher: ServiceDiscoveryPublisherProtocol, Sendab
     }
 
     private struct ServiceDetails: CustomStringConvertible {
-        var configKeys: [String: [String]]
+        var workloadTags: [String: WorkloadConfig.RoutingTagValue]
         var retractionPromise: Promise<Void, Never>
 
         var description: String {
-            "ServiceDetails: configKeys=\(self.configKeys)"
+            "ServiceDetails: workloadTags=\(self.workloadTags)"
         }
     }
 
@@ -202,10 +203,10 @@ final class ServiceDiscoveryPublisher: ServiceDiscoveryPublisherProtocol, Sendab
         }
     }
 
-    func announceService(name: String, workloadConfig: [String: [String]]) {
+    func announceService(name: String, workloadConfig: [String: WorkloadConfig.RoutingTagValue]) {
         let promise: Promise<Void, Never>? = self.state.withLock { state in
             let serviceState = state.services[name]
-            if serviceState?.configKeys == workloadConfig {
+            if serviceState?.workloadTags == workloadConfig {
                 Self.logger.log("Announcing \(name, privacy: .public) with duplicate config, no change")
                 return nil
             }
@@ -218,12 +219,12 @@ final class ServiceDiscoveryPublisher: ServiceDiscoveryPublisherProtocol, Sendab
             }
 
             // In either case, we have a change here.
-            let details = ServiceDetails(configKeys: workloadConfig, retractionPromise: .init())
+            let details = ServiceDetails(workloadTags: workloadConfig, retractionPromise: .init())
             state.services[name] = details
 
             if let serviceState {
                 Self.logger.log(
-                    "Re-announcing \(name, privacy: .public) with config \(workloadConfig, privacy: .public) replacing \(serviceState.configKeys, privacy: .public)"
+                    "Re-announcing \(name, privacy: .public) with config \(workloadConfig, privacy: .public) replacing \(serviceState.workloadTags, privacy: .public)"
                 )
 
                 state.serviceUpdateContinuation?.yield(.init(name: name, details: details))
@@ -374,7 +375,7 @@ final class ServiceDiscoveryPublisher: ServiceDiscoveryPublisherProtocol, Sendab
         Self.logger.log("Beginning service discovery publisher loop for \(service.name, privacy: .public)")
         var result = await self.sendServiceRegistration(
             serviceName: service.name,
-            serviceConfig: service.details.configKeys,
+            workloadTags: service.details.workloadTags,
             stream: stream
         )
         if let result {
@@ -440,7 +441,7 @@ final class ServiceDiscoveryPublisher: ServiceDiscoveryPublisherProtocol, Sendab
 
     private func sendServiceRegistration(
         serviceName: String,
-        serviceConfig: [String: [String]],
+        workloadTags: [String: WorkloadConfig.RoutingTagValue],
         stream: GRPCAsyncRequestStreamWriter<Request>
     ) async -> UpdateEndResult? {
         let cloudOSBuildVersionToPublish = self.nodeInfo?.cloudOSBuildVersion
@@ -464,7 +465,7 @@ final class ServiceDiscoveryPublisher: ServiceDiscoveryPublisherProtocol, Sendab
                             },
                             "workload": .with {
                                 $0.fields = [String: Com_Apple_Ase_Traffic_Servicediscovery_Api_V1_MetaValue](
-                                    serviceConfig
+                                    workloadTags
                                 )
                             },
                             "description": .with {
@@ -608,15 +609,25 @@ extension [String: Com_Apple_Ase_Traffic_Servicediscovery_Api_V1_MetaValue] {
 }
 
 extension [String: Com_Apple_Ase_Traffic_Servicediscovery_Api_V1_MetaValue] {
-    init(_ data: [String: [String]]) {
-        self = data.mapValues { stringValues in
-            .with {
-                $0.listValue = .with {
-                    $0.values = stringValues.map { stringValue in
-                        .with {
-                            $0.stringValue = stringValue
+    init(_ data: [String: WorkloadConfig.RoutingTagValue]) {
+        self = data.mapValues { routingTagValue in
+            return .with {
+                switch routingTagValue {
+                case .string(let stringValue):
+                    $0.stringValue = stringValue
+                case .stringList(let stringValues):
+                    $0.listValue = .with {
+                        $0.values = stringValues.map { stringValue in
+                            .with {
+                                $0.stringValue = stringValue
+                            }
                         }
                     }
+                @unknown default:
+                    ServiceDiscoveryPublisher.logger.error(
+                        "Unknown routing tag value type: \(routingTagValue, privacy: .public)"
+                    )
+                    $0.stringValue = "<failed-to-decode>"
                 }
             }
         }

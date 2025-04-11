@@ -19,64 +19,18 @@
 //  Created by Andrea Guzzo on 8/25/22.
 //
 
+internal import CloudMetricsConstants
+internal import CloudMetricsXPC
 import Foundation
 import os
 
-internal typealias CloudMetricsClientCallback = () async -> Void
-internal typealias CloudMetricsClientContinuation = AsyncStream<CloudMetricsClientCallback>.Continuation
 
-private var logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "Factory")
-internal let kCloudMetricsDispatchGroup = DispatchGroup()
+internal final class CloudMetricsFactory: Sendable {
+    internal let metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "Factory")
 
-internal final class CloudMetricsFactory: @unchecked Sendable {
-    private var xpcClient: CloudMetricsXPCClient?
-    private let clientStream: AsyncStream<CloudMetricsClientCallback>
-    internal var clientStreamContinuation: AsyncStream<CloudMetricsClientCallback>.Continuation
-
-    internal init() {
-        // swiftlint:disable:next implicitly_unwrapped_optional
-        var continuation: AsyncStream<CloudMetricsClientCallback>.Continuation! = nil
-        self.clientStream = AsyncStream<CloudMetricsClientCallback> { continuation = $0 }
-        self.clientStreamContinuation = continuation
-        kCloudMetricsDispatchGroup.enter()
-        Task {
-            await connectXpcClient()
-            for await callback in clientStream {
-                if xpcClient == nil {
-                    await connectXpcClient()
-                }
-                await callback()
-            }
-            kCloudMetricsDispatchGroup.leave()
-        }
-    }
-
-    // This should be called only within the clientStream execution queue
-    private func connectXpcClient() async {
-        let continuation = self.clientStreamContinuation
-        let client = CloudMetricsXPCClient(
-            interruptionHandler: { _ in
-                // interruptions are "soft errors", in theory we could retry sending messages
-                // but given the best-effor nature of our service we can just ignore the event
-                // and move forward.
-            },
-            invalidationHandler: { [weak self] _ in
-                // Setting the client to nil will trigger renewal of the connection
-                // at next metric update.
-                // We want this to happen in the clientStream execution queue
-                // to ensure thread safety
-                continuation.yield {
-                    logger.log("XPC connection invalidated")
-                    self?.xpcClient = nil
-                }
-            })
-        logger.log("Connecting to CloudMetrics service")
-        await client.connect()
-        self.xpcClient = client
-    }
-
-    internal func client() -> CloudMetricsXPCClient? {
-        xpcClient
+    internal init(metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation) {
+        self.metricUpdateContinuation = metricUpdateContinuation
     }
 
     // MARK: - CloudMetrics Types which are not part of swift-metrics
@@ -84,7 +38,7 @@ internal final class CloudMetricsFactory: @unchecked Sendable {
         let histogram = CloudMetricsHistogram(label: label,
                                               dimensions: dimensions.reduce(into: [:]) { $0[$1.0] = $1.1 },
                                               buckets: buckets)
-        return CloudMetricsHistogramHandler(cloudMetrics: self, histogram: histogram)
+        return CloudMetricsHistogramHandler(metricUpdateContinuation: self.metricUpdateContinuation, histogram: histogram)
     }
 
     internal func destroyHistogram(_ handler: HistogramHandler) {
@@ -94,15 +48,10 @@ internal final class CloudMetricsFactory: @unchecked Sendable {
         let summary = CloudMetricsSummary(label: label,
                                           dimensions: dimensions.reduce(into: [:]) { $0[$1.0] = $1.1 },
                                           quantiles: quantiles)
-        return CloudMetricsSummaryHandler(cloudMetrics: self, summary: summary)
+        return CloudMetricsSummaryHandler(metricUpdateContinuation: self.metricUpdateContinuation, summary: summary)
     }
 
     internal func destroySummary(_ handler: SummaryHandler) {
-    }
-
-    deinit {
-        clientStreamContinuation.finish()
-        _ = kCloudMetricsDispatchGroup.wait(timeout: .now() + .seconds(5))
     }
 }
 
@@ -115,7 +64,7 @@ extension CloudMetricsFactory: MetricsFactory {
     internal func makeCounter(label: String, dimensions: [(String, String)]) -> CounterHandler {
         let counter = CloudMetricsCounter(label: label,
                                           dimensions: dimensions.reduce(into: [:]) { $0[$1.0] = $1.1 })
-        return CloudMetricsCounterHandler(cloudMetrics: self, counter: counter)
+        return CloudMetricsCounterHandler(metricUpdateContinuation: self.metricUpdateContinuation, counter: counter)
     }
 
     /// Create a backing `FloatingPointCounterHandler`.
@@ -127,7 +76,7 @@ extension CloudMetricsFactory: MetricsFactory {
         -> FloatingPointCounterHandler {
         let counter = CloudMetricsCounter(label: label,
                                           dimensions: dimensions.reduce(into: [:]) { $0[$1.0] = $1.1 })
-        return CloudMetricsCounterHandler(cloudMetrics: self, counter: counter)
+        return CloudMetricsCounterHandler(metricUpdateContinuation: self.metricUpdateContinuation, counter: counter)
     }
 
     /// Create a backing `RecorderHandler`.
@@ -140,7 +89,7 @@ extension CloudMetricsFactory: MetricsFactory {
         let recorder = CloudMetricsRecorder(label: label,
                                             dimensions: dimensions.reduce(into: [:]) { $0[$1.0] = $1.1 },
                                             aggregate: aggregate)
-        return CloudMetricsRecorderHandler(cloudMetrics: self, recorder: recorder)
+        return CloudMetricsRecorderHandler(metricUpdateContinuation: self.metricUpdateContinuation, recorder: recorder)
     }
 
     /// Create a backing `TimerHandler`.
@@ -151,7 +100,7 @@ extension CloudMetricsFactory: MetricsFactory {
     internal func makeTimer(label: String, dimensions: [(String, String)]) -> TimerHandler {
         let timer = CloudMetricsTimer(label: label,
                                       dimensions: dimensions.reduce(into: [:]) { $0[$1.0] = $1.1 })
-        return CloudMetricsTimerHandler(cloudMetrics: self, timer: timer)
+        return CloudMetricsTimerHandler(metricUpdateContinuation: self.metricUpdateContinuation, timer: timer)
     }
 
     /// Invoked when the corresponding `Counter`'s `destroy()` function is invoked.
@@ -186,6 +135,3 @@ extension CloudMetricsFactory: MetricsFactory {
     internal func destroyTimer(_ handler: TimerHandler) {
     }
 }
-
-// Sendability is ensured by synchronising internally
-extension CloudMetrics: @unchecked Sendable {}

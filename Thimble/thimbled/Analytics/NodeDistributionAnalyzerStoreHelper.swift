@@ -30,7 +30,7 @@ final class NodeDistributionAnalyzerStoreHelper: @unchecked Sendable {
     /// It is only being modified or used on tasks we put on a sequential queue
     private var fileHandle: FileHandle?
 
-    let logger = tc2Logger(forCategory: .MetricReporter)
+    let logger = tc2Logger(forCategory: .metricReporter)
 
     /// sequential queue for executing file IO tasks
     private let queue = DispatchSerialQueue(label: "com.apple.privatecloudcompute.nodedistributionanalyzer.blockingio", target: blockingIOQueue)
@@ -44,6 +44,12 @@ final class NodeDistributionAnalyzerStoreHelper: @unchecked Sendable {
         if let fileHandle = self.fileHandle {
             try? fileHandle.close()
         }
+    }
+
+    static func migrate(from source: URL, to destination: URL) {
+        let sourceFile = source.appending(path: Self.filename)
+        let destinationFile = destination.appending(path: Self.filename)
+        moveDaemonStateFile(from: sourceFile, to: destinationFile)
     }
 
     /// write lines

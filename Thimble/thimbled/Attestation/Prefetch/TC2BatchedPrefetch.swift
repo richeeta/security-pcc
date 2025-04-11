@@ -43,16 +43,18 @@ final class TC2BatchedPrefetch<
     ConnectionFactory: NWAsyncConnectionFactoryProtocol,
     AttestationStore: TC2AttestationStoreProtocol,
     RateLimiter: RateLimiterProtocol,
-    AttestationVerifier: TC2AttestationVerifier
+    AttestationVerifier: TC2AttestationVerifier,
+    SystemInfo: SystemInfoProtocol
 >: Sendable {
     private let encoder = tc2JSONEncoder()
-    private let logger = tc2Logger(forCategory: .PrefetchRequest)
+    private let logger = tc2Logger(forCategory: .prefetchRequest)
     private let connectionFactory: ConnectionFactory
     private let attestationStore: AttestationStore
     private let rateLimiter: RateLimiter
     private let attestationVerifier: AttestationVerifier
     private let config: TC2Configuration
     private let serverDrivenConfig: TC2ServerDrivenConfiguration
+    private let systemInfo: SystemInfo
     private let parameters: TC2RequestParameters
     private let eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation
     private let prewarm: Bool
@@ -68,6 +70,7 @@ final class TC2BatchedPrefetch<
         attestationVerifier: AttestationVerifier,
         config: TC2Configuration,
         serverDrivenConfig: TC2ServerDrivenConfiguration,
+        systemInfo: SystemInfo,
         parameters: TC2RequestParameters,
         eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation,
         prewarm: Bool,
@@ -81,6 +84,7 @@ final class TC2BatchedPrefetch<
         self.attestationVerifier = attestationVerifier
         self.config = config
         self.serverDrivenConfig = serverDrivenConfig
+        self.systemInfo = systemInfo
         self.parameters = parameters
         self.eventStreamContinuation = eventStreamContinuation
         self.prewarm = prewarm
@@ -89,7 +93,7 @@ final class TC2BatchedPrefetch<
         self.fetchType = fetchType
     }
 
-    func fetchBatch(
+    private func fetchBatch(
         batchUUID: UUID,
         requestID: UUID,
         requestIDForReporting: UUID,
@@ -100,171 +104,186 @@ final class TC2BatchedPrefetch<
         workloadParametersAsString: String,
         maxAttestations: Int
     ) async throws -> (response: Prefetch.Response, successfulSaveCount: Int) {
-        self.logger.log("\(batchUUID): fetchBatch: batchID: \(batchID) requestID: \(requestID) fetchTime: \(fetchTime) maxAttestations: \(maxAttestations)")
-        var response = Prefetch.Response(id: requestID, nodes: [])
         var successfulSaveCount = 0
+        var response = Prefetch.Response(id: requestID, nodes: [])
+
+        let logPrefix = "\(requestID):"
+        self.logger.log("\(logPrefix) executing prefetch request")
+        defer {
+            self.logger.log("\(logPrefix) finished prefetch request")
+        }
+
+        let environment = self.config.environment(systemInfo: self.systemInfo)
 
         try await self.connectionFactory.connect(
-            parameters: .makeTLSAndHTTPParameters(ignoreCertificateErrors: self.config[.ignoreCertificateErrors], forceOHTTP: self.config.environment.forceOHTTP, bundleIdentifier: self.bundleIdentifier),
-            endpoint: .url(self.config.environment.ropesUrl),
+            parameters: .makeTLSAndHTTPParameters(
+                ignoreCertificateErrors: self.config[.ignoreCertificateErrors],
+                forceOHTTP: environment.forceOHTTP,
+                useCompression: true,
+                bundleIdentifier: self.bundleIdentifier
+            ),
+            endpoint: .url(environment.ropesUrl),
             activity: NWActivity(domain: .cloudCompute, label: .attestationPrefetch),
             on: .main,
             requestID: requestID
         ) { inbound, outbound, _ in
-            self.logger.log("\(requestID) sending request with parameters: \(workloadParametersAsString)")
-
-            var prefetchAttestationMetric = TC2PrefetchAttestationMetric()
-            prefetchAttestationMetric.fields[.eventTime] = .int(Int64(Date().timeIntervalSince1970))
-            prefetchAttestationMetric.fields[.clientInfo] = .string(tc2OSInfo)
+            self.logger.log("\(logPrefix) sending request with parameters: \(workloadParametersAsString)")
 
             // Client should hint maxAttestations to save attestations processed per request
-            let prefetchRequest = Proto_Ropes_HttpService_PrefetchAttestationsRequest.with { req in
-                req.capabilities = .with { caps in
-                    caps.compressionAlgorithm = [.brotli]
-                }
-                req.clientRequestedAttestationCount = UInt32(maxAttestations)
+            let prefetchRequest = Proto_Ropes_HttpService_PrefetchRequest.with {
+                $0.capabilities.attestationStreaming = true
+                $0.clientRequestedAttestationCount = UInt32(maxAttestations)
             }
             let prefetchRequestData = try prefetchRequest.serializedData()
 
             let httpRequest = HTTPRequest(
                 method: .post,
                 scheme: "https",
-                authority: self.config.environment.ropesHostname,
+                authority: environment.ropesHostname,
                 path: self.config[.prefetchRequestPath],
                 headerFields: headers
             )
 
-            self.logger.log("\(requestID) sending request: \(httpRequest.debugDescription) with parameters: \(workloadParametersAsString)")
-            self.logger.log("\(requestID) headers: \(String(describing: headers))")
+            self.logger.log("\(logPrefix) sending request: \(String(reflecting: httpRequest)) with parameters: \(workloadParametersAsString)")
+            self.logger.log("\(logPrefix) headers: \(String(describing: headers))")
             try await outbound.write(
                 content: prefetchRequestData,
                 contentContext: .init(request: httpRequest),
                 isComplete: true
             )
 
-            self.logger.info("\(requestID) waiting for response")
-            var data = Data()
-            for try await received in inbound {
-                if let segment = received.data {
-                    data.append(segment)
-                }
-                if received.isComplete {
-                    self.logger.info("\(requestID) response complete")
-                    break
-                }
-            }
+            self.logger.info("\(logPrefix) waiting for response")
 
-            guard data.count > 0 else {
-                let error = TrustedCloudComputeError(message: "prefetch returned empty response")
-                prefetchAttestationMetric.fields[.prefetchSuccess] = false
-                prefetchAttestationMetric.fields[.prefetchError] = error.telemetryString
-                self.eventStreamContinuation.yield(.exportMetric(prefetchAttestationMetric))
-                throw error
-            }
-
-            self.logger.log("\(requestID) received response \(data.count)")
-            let attestationResponse = try Proto_Ropes_HttpService_PrefetchAttestationsResponse(serializedBytes: data)
-            prefetchAttestationMetric.fields[.prefetchSuccess] = true
-            var nodeIDsReceived: [String] = []
-
-            await withTaskGroup(of: Prefetch.Response.Node.self) { group in
-                // We are using a task group and limit the amount of concurrent tasks.
-                // To do this we spawn up to the maximum limit of child tasks and then
-                // wait for the results. For each result we are spawning a new child task if needed.
-                var attestations = attestationResponse.attestation
-                let compressedAttestations = tc2AttestationListFromCompressedAttestationList(attestationResponse.compressedAttestationList, logger: self.logger)
-                attestations.append(contentsOf: compressedAttestations.attestation)
-
-                self.logger.log("\(requestID) decoded attestation response attestation count \(attestations.count)")
-                response.nodes.reserveCapacity(attestations.count)
-                prefetchAttestationMetric.fields[.attestationCount] = .int(Int64(attestations.count))
-
-                // Delete existing batchID for this parameter set
-                await self.attestationStore.deleteEntries(withParameters: prefetchParameters, batchId: batchID)
-
-                var attestationIterator = attestations.makeIterator()
-                for _ in 0..<Constants.maximumConcurrentAttestationVerifications {
-                    guard let attestation = attestationIterator.next() else {
-                        break
-                    }
-                    group.addTask {
-                        await self.verifyAndStore(
-                            attestation: attestation,
-                            prefetchParameters: prefetchParameters,
-                            prewarm: self.prewarm,
-                            requestID: requestID,
-                            requestIDForReporting: requestIDForReporting,
-                            batchID: batchID,
-                            fetchTime: fetchTime
+            let deframed =
+                inbound
+                .onHTTPResponseHead { response in
+                    self.logger.info("\(logPrefix) response head received: \(String(describing: response)); headers: \(String(describing: response.headerFields))")
+                    guard response.status == .ok else {
+                        throw PrefetchRequestError(
+                            code: .unexpectedStatusCode,
+                            underlying: PrefetchRequestError.UnexpectedStatusCode(statusCode: response.status.code)
                         )
                     }
+                    await self.attestationStore.deleteEntries(withParameters: prefetchParameters, batchId: batchID)
+                } onTrailers: { trailers in
+                    self.logger.info("\(logPrefix) response trailers received: \(String(describing: trailers))")
                 }
+                .deframed(lengthType: UInt32.self, messageType: Proto_Ropes_HttpService_PrefetchResponse.self)
 
-                while let node = await group.next() {
-                    if node.savedToCache {
-                        successfulSaveCount += 1
-                    }
+            var attestationsReceived = 0
+            var nodeIDsReceived: [String] = []
 
-                    // Having verified the attestation, we now can collect its hardware
-                    // identifier for publishing to the event stream that tracks the
-                    // distribution of nodes. See rdar://135384108 for details.
-                    if let uniqueNodeIdentifier = node.uniqueNodeIdentifier {
-                        nodeIDsReceived.append(uniqueNodeIdentifier)
-                    }
+            await withTaskGroup(of: Prefetch.Response.Node.self) { taskGroup in
+                do {
+                    var concurrentAttestationVerifications: Int = 0
 
-                    response.nodes.append(node)
+                    for try await message in deframed {
+                        messageProcessing: switch message.type {
+                        case .attestation(let attestation):
+                            self.logger.debug("\(logPrefix) attestation received")
+                            attestationsReceived += 1
+                            if concurrentAttestationVerifications == Constants.maximumConcurrentAttestationVerifications {
+                                // save to bang! We have more than Constants.maximumConcurrentAttestationVerifications
+                                // currently running, because of this there is definitely a task that we can await here.
+                                let node = await taskGroup.next()!
+                                concurrentAttestationVerifications -= 1
 
-                    if response.nodes.count >= maxAttestations {
-                        // We should only process maxAttestations count of attestations, even if ROPES sends us more
-                        break
-                    }
+                                if node.savedToCache {
+                                    successfulSaveCount += 1
+                                }
 
-                    if let attestation = attestationIterator.next() {
-                        group.addTask {
-                            await self.verifyAndStore(
-                                attestation: attestation,
-                                prefetchParameters: prefetchParameters,
-                                prewarm: self.prewarm,
-                                requestID: requestID,
-                                requestIDForReporting: requestIDForReporting,
-                                batchID: batchID,
-                                fetchTime: fetchTime
-                            )
+                                // Having verified the attestation, we now can collect its hardware
+                                // identifier for publishing to the event stream that tracks the
+                                // distribution of nodes. See rdar://135384108 for details.
+                                if let uniqueNodeIdentifier = node.uniqueNodeIdentifier {
+                                    nodeIDsReceived.append(uniqueNodeIdentifier)
+                                }
+
+                                response.nodes.append(node)
+                            }
+
+                            if response.nodes.count >= maxAttestations {
+                                // We should only process maxAttestations count of attestations, even if ROPES sends us more
+                                break messageProcessing
+                            }
+
+                            concurrentAttestationVerifications += 1
+                            taskGroup.addTask {
+                                await self.verifyAndStore(
+                                    attestation: attestation,
+                                    prefetchParameters: prefetchParameters,
+                                    prewarm: self.prewarm,
+                                    requestID: requestID,
+                                    requestIDForReporting: requestIDForReporting,
+                                    batchID: batchID,
+                                    fetchTime: fetchTime
+                                )
+                            }
+
+                        case .rateLimitConfigurationList(let rateLimitConfigurationList):
+                            self.logger.log("\(logPrefix) received rate limit configuration count \(rateLimitConfigurationList.rateLimitConfiguration.count)")
+                            for proto in rateLimitConfigurationList.rateLimitConfiguration {
+                                if let rateLimitConfig = RateLimitConfiguration(now: Date.now, proto: proto, config: config) {
+                                    await self.rateLimiter.limitByConfiguration(rateLimitConfig)
+                                } else {
+                                    self.logger.error("\(logPrefix) unable to process rate limit configuration \(String(describing: proto))")
+                                }
+                            }
+                            await self.rateLimiter.save()
+
+                        case .none:
+                            break
                         }
                     }
+
+                    self.logger.info("\(logPrefix) response complete")
+
+                    // the http stream has finished, lets await all the running verifications
+                    while let node = await taskGroup.next() {
+                        concurrentAttestationVerifications -= 1
+
+                        if node.savedToCache {
+                            successfulSaveCount += 1
+                        }
+
+                        // Having verified the attestation, we now can collect its hardware
+                        // identifier for publishing to the event stream that tracks the
+                        // distribution of nodes. See rdar://135384108 for details.
+                        if let uniqueNodeIdentifier = node.uniqueNodeIdentifier {
+                            nodeIDsReceived.append(uniqueNodeIdentifier)
+                        }
+
+                        response.nodes.append(node)
+                    }
+                    assert(concurrentAttestationVerifications == 0)
+                } catch {
+                    self.logger.error("\(logPrefix) response failed: \(String(describing: error))")
                 }
+            }
+
+            if attestationsReceived == 0 {
+                throw TrustedCloudComputeError(message: "prefetch returned empty response")
             }
 
             // note that we have received these attestations/nodes
             self.eventStreamContinuation.yield(.nodesReceived(nodeIDs: nodeIDsReceived, fromSource: self.prewarm ? .prewarm : .prefetch))
-
-            prefetchAttestationMetric.fields[.successfulSaveCount] = .int(Int64(successfulSaveCount))
-            self.eventStreamContinuation.yield(.exportMetric(prefetchAttestationMetric))
-
-            let rateLimitCount = attestationResponse.rateLimitConfigurationList.rateLimitConfiguration.count
-            if rateLimitCount > 0 {
-                self.logger.log("\(requestID) received rate limit configuration count \(rateLimitCount)")
-                for proto in attestationResponse.rateLimitConfigurationList.rateLimitConfiguration {
-                    if let rateLimitConfig = RateLimitConfiguration(now: Date.now, proto: proto, config: config) {
-                        await self.rateLimiter.limitByConfiguration(rateLimitConfig)
-                    } else {
-                        self.logger.error("\(requestID) unable to process rate limit configuration \(String(describing: proto))")
-                    }
-                }
-                await rateLimiter.save()
-            }
         }
 
         return (response, successfulSaveCount)
     }
 
     func sendRequest() async throws -> [Prefetch.Response] {
-        self.logger.log("executing prefetch batch: \(self.batchUUID) prewarm: \(self.prewarm)")
+        let logPrefix = "\(self.batchUUID):"
+        self.logger.log("\(logPrefix) executing batch of prefetch requests, prewarm=\(self.prewarm)")
+        defer {
+            self.logger.log("\(logPrefix) finished batch of prefetch requests")
+        }
+
         var response: [Prefetch.Response] = []
 
         // Get the prefetch parameters needed from invoke parameters
         guard let prefetchParameters = TC2PrefetchParameters().prefetchParameters(invokeParameters: parameters) else {
-            self.logger.error("invalid set of parameters for prefetching")
+            self.logger.error("\(logPrefix) invalid set of parameters for prefetching")
             return response
         }
 
@@ -274,23 +293,20 @@ final class TC2BatchedPrefetch<
         // maxPrefetchedAttestations is capped to 60
         let maxPrefetchedAttestationsFromConfig = self.config[.maxPrefetchedAttestations]
         let maxPrefetchedAttestationsFromServerConfig = self.serverDrivenConfig.maxPrefetchedAttestations ?? maxPrefetchedAttestationsFromConfig
-        let maxAttestationsPerRequest = min(maxPrefetchedAttestationsFromServerConfig, maxPrefetchedAttestationsFromConfig)
-        let maxPrefetchBatches = self.serverDrivenConfig.maxPrefetchBatches ?? self.config[.maxPrefetchBatches]
+        let maxAttestationsPerRequest = max(1, min(maxPrefetchedAttestationsFromServerConfig, maxPrefetchedAttestationsFromConfig))
+        let maxPrefetchBatches = max(1, self.serverDrivenConfig.maxPrefetchBatches ?? self.config[.maxPrefetchBatches])
 
-        var maxPrefetchRequests: Int = 0
-        var batchToBeFetched: UInt? = nil
+        let batchIDsToFetch: ClosedRange<UInt>
         switch self.fetchType {
         case .fetchAllBatches:
-            maxPrefetchRequests = maxPrefetchBatches
+            batchIDsToFetch = 0...UInt(maxPrefetchBatches - 1)
         case .fetchSingleBatch(let batchID):
-            maxPrefetchRequests = 1
-            batchToBeFetched = batchID
+            batchIDsToFetch = batchID...batchID
         }
 
-        let clientCacheSize = maxAttestationsPerRequest * maxPrefetchRequests
         let prewarmAttestationsAvailability = maxAttestationsPerRequest * Constants.prewarmAttestationsAvailabilityBatchCount
         self.logger.log(
-            "configuration: maxPrefetchedAttestations: \(maxAttestationsPerRequest), clientCacheSize: \(clientCacheSize), maxPrefetchRequests: \(maxPrefetchRequests), maxPrefetchBatches: \(maxPrefetchBatches), prewarmAttestationsAvailability: \(prewarmAttestationsAvailability)"
+            "\(logPrefix) configuration: maxPrefetchedAttestations: \(maxAttestationsPerRequest), clientCacheSize: \(maxAttestationsPerRequest * batchIDsToFetch.count), maxPrefetchRequests: \(batchIDsToFetch.count), maxPrefetchBatches: \(maxPrefetchBatches), prewarmAttestationsAvailability: \(prewarmAttestationsAvailability)"
         )
 
         // Check if we have valid prefetched or prewarmed attestations before issuing a prewarm for the set of parameters
@@ -303,13 +319,13 @@ final class TC2BatchedPrefetch<
                 clientCacheSize: prewarmAttestationsAvailability,
                 fetchTime: fetchTime
             ) {
-                self.logger.error("not prefetching, attestations exist for workload")
+                self.logger.error("\(logPrefix) not prefetching, attestations exist for workload")
                 throw TrustedCloudComputeError(message: "attestations exist for workload")
             }
         }
 
         var headers = HTTPFields([
-            .init(name: .appleClientInfo, value: tc2OSInfo),
+            .init(name: .appleClientInfo, value: self.systemInfo.osInfo),
             .init(name: .appleWorkload, value: prefetchParameters.pipelineKind),
             .init(name: .appleWorkloadParameters, value: workloadParametersAsString),
             .init(name: .contentType, value: HTTPField.Constants.contentTypeApplicationXProtobuf),
@@ -319,11 +335,11 @@ final class TC2BatchedPrefetch<
         if prewarm {
             // Caller should have supplied a featureIdentifier and a bundleIdentifier here
             guard let bundleID = bundleIdentifier else {
-                self.logger.error("not prefetching, missing bundleIdentifier")
+                self.logger.error("\(logPrefix) not prefetching, missing bundleIdentifier")
                 throw TrustedCloudComputeError(message: "missing bundleIdentifier")
             }
             guard let featureID = featureIdentifier else {
-                self.logger.error("not prefetching, missing featureIdentifier")
+                self.logger.error("\(logPrefix) not prefetching, missing featureIdentifier")
                 throw TrustedCloudComputeError(message: "missing featureIdentifier")
             }
             headers[HTTPField.Name.appleBundleID] = bundleID
@@ -332,6 +348,10 @@ final class TC2BatchedPrefetch<
             // Prefetches carry default values for these fields
             headers[HTTPField.Name.appleBundleID] = Bundle.main.bundleIdentifier
             headers[HTTPField.Name.appleFeatureID] = "backgroundActivity.prefetchRequest"
+        }
+
+        if let automatedDeviceGroup = self.systemInfo.automatedDeviceGroup {
+            headers[.appleAutomatedDeviceGroup] = automatedDeviceGroup
         }
 
         if let testOptionsHeader = self.config[.testOptions] {
@@ -346,33 +366,39 @@ final class TC2BatchedPrefetch<
             headers[HTTPField.Name.appleServerHintForReal] = "true"
         }
 
+        // Is fetchTime actually supposed to be the same for every batch? It winds up in the
+        // attestation store so it is hard to know what the impact will be.
         let fetchTime = Date()
-        for requestCount in 0..<maxPrefetchRequests {
+        self.logger.log("\(logPrefix) fetchTime: \(fetchTime)")
+
+        for batchID in batchIDsToFetch {
+            let logPrefix = "\(self.batchUUID)#\(batchID):"
+
             // We will only ever try requestCount number of requests. It is a best case effort to try and fill up
             // the cache upto clientCacheSize, but if ROPES doesn't have any more attestations, we will need to bail
             let requestID = UUID()
 
             let requestIDForReporting: UUID
-            switch self.config.environment {
+            switch self.config.environment(systemInfo: self.systemInfo) {
             case .production:
                 // we need to have a different UUID for reporting for PROD due to privacy concerns
                 requestIDForReporting = UUID()
-                self.logger.log("Request: \(requestID) RequestIDForReporting: \(requestIDForReporting)")
+                self.logger.log("\(logPrefix) Request: \(requestID) RequestIDForReporting: \(requestIDForReporting)")
             default:
                 requestIDForReporting = requestID
             }
-            self.logger.log("\(requestID) requestCount: \(requestCount)")
 
             headers[HTTPField.Name.appleRequestUUID] = requestID.uuidString
 
             do {
+
                 let batchResponse: Prefetch.Response
                 let saveCount: Int
                 (batchResponse, saveCount) = try await fetchBatch(
                     batchUUID: self.batchUUID,
                     requestID: requestID,
                     requestIDForReporting: requestIDForReporting,
-                    batchID: batchToBeFetched ?? UInt(requestCount),
+                    batchID: batchID,
                     fetchTime: fetchTime,
                     headers: headers,
                     prefetchParameters: prefetchParameters,
@@ -383,9 +409,9 @@ final class TC2BatchedPrefetch<
                 // batchResponse is just for thtool to print out the nodes, it will have duplicate nodes as well
                 response.append(batchResponse)
                 let duplicates = batchResponse.nodes.count - saveCount
-                self.logger.log("\(requestID): attestations saved: \(saveCount) duplicates: \(duplicates)")
+                self.logger.log("\(logPrefix) attestations saved: \(saveCount) duplicates: \(duplicates)")
             } catch {
-                self.logger.error("\(requestID): failed to fetch batch: \(requestCount): error: \(error)")
+                self.logger.error("\(logPrefix) failed to fetch batch error: \(error)")
                 throw error
             }
         }
@@ -402,12 +428,14 @@ final class TC2BatchedPrefetch<
         batchID: UInt,
         fetchTime: Date
     ) async -> Prefetch.Response.Node {
+        let logPrefix = "\(requestID):"
+
         // Check if we have this attestation in our store already
         do {
             // Get the unique identifier for the node received from ROPES
             if let uid = try await self.attestationVerifier.uniqueNodeIdentifier(attestation: .init(attestation: attestation, requestParameters: prefetchParameters)) {
                 if await self.attestationStore.nodeExists(withUniqueIdentifier: uid) {
-                    self.logger.error("\(requestID): node exists in store for attestation \(uid) \(attestation.nodeIdentifier)")
+                    self.logger.log("\(logPrefix) node exists in store for attestation \(uid) \(attestation.nodeIdentifier)")
                     // Track this node for the parameter set
                     let nodeAlreadyTrackedInBatch = await self.attestationStore.trackNodeForParameters(
                         forParameters: prefetchParameters,
@@ -438,7 +466,7 @@ final class TC2BatchedPrefetch<
                     }
                 }
             } else {
-                self.logger.error("\(requestID): unique identifier for attestation \(attestation.nodeIdentifier) missing")
+                self.logger.error("\(logPrefix) unique identifier for attestation \(attestation.nodeIdentifier) missing")
                 return .init(
                     identifier: attestation.nodeIdentifier,
                     cloudOSVersion: attestation.cloudosVersion,
@@ -449,7 +477,7 @@ final class TC2BatchedPrefetch<
                 )
             }
         } catch {
-            self.logger.error("\(requestID): unable to check the unique id of the attestation and hence skipping validation: \(attestation.nodeIdentifier)")
+            self.logger.error("\(logPrefix) unable to check the unique id of the attestation and hence skipping validation: \(attestation.nodeIdentifier)")
             return .init(
                 identifier: attestation.nodeIdentifier,
                 cloudOSVersion: attestation.cloudosVersion,
@@ -470,7 +498,7 @@ final class TC2BatchedPrefetch<
 
             // Check if we ever got a unique identifier for this attestation before storing
             guard let uniqueNodeIdentifier = validatedAttestation.uniqueNodeIdentifier else {
-                self.logger.error("\(requestID): attestation validation did not return a unique id for attestation: \(attestation.nodeIdentifier)")
+                self.logger.error("\(logPrefix) attestation validation did not return a unique id for attestation: \(attestation.nodeIdentifier)")
                 return .init(
                     identifier: attestation.nodeIdentifier,
                     cloudOSVersion: attestation.cloudosVersion,
@@ -483,7 +511,7 @@ final class TC2BatchedPrefetch<
 
             // Check attestation expiry times
             if validatedAttestation.attestationExpiry.timeIntervalSinceNow > Constants.maximumExpiryDuration {
-                self.logger.error("\(requestID): attestation validation returned too long expiration for attestation: \(attestation.nodeIdentifier); expiry: \(validatedAttestation.attestationExpiry)")
+                self.logger.error("\(logPrefix) attestation validation returned too long expiration for attestation: \(attestation.nodeIdentifier); expiry: \(validatedAttestation.attestationExpiry)")
                 return .init(
                     identifier: attestation.nodeIdentifier,
                     cloudOSVersion: attestation.cloudosVersion,
@@ -496,10 +524,10 @@ final class TC2BatchedPrefetch<
 
             // Attempt to save the validated attestation to the cache
             if await self.attestationStore.saveValidatedAttestation(validatedAttestation, for: prefetchParameters, prefetched: !prewarm, batch: batchID, fetchTime: fetchTime) {
-                self.logger.log("\(requestID) successfully saved attestation for node: \(attestation.nodeIdentifier)")
+                self.logger.log("\(logPrefix) successfully saved attestation for node: \(attestation.nodeIdentifier)")
                 savedToCache = true
             } else {
-                self.logger.log("\(requestID) failed to save attestation for node: \(attestation.nodeIdentifier)")
+                self.logger.log("\(logPrefix) failed to save attestation for node: \(attestation.nodeIdentifier)")
             }
 
             return .init(
@@ -511,14 +539,14 @@ final class TC2BatchedPrefetch<
                 uniqueNodeIdentifier: uniqueNodeIdentifier
             )
         } catch {
-            self.logger.error("\(requestID): attestation validation failed for node: \(attestation.nodeIdentifier) with error: \(error)")
+            self.logger.error("\(logPrefix) attestation validation failed for node: \(attestation.nodeIdentifier) with error: \(error)")
 
             // we need to report this error
             var verificationErrorMetric = TC2AttestationnVerificationErrorMetric(bundleID: self.bundleIdentifier)
             verificationErrorMetric.fields[.clientRequestid] = .string(requestIDForReporting.uuidString)
             verificationErrorMetric.fields[.eventTime] = .int(Int64(Date().timeIntervalSince1970))
-            verificationErrorMetric.fields[.environment] = .string(self.config.environment.name)
-            verificationErrorMetric.fields[.clientInfo] = .string(tc2OSInfo)
+            verificationErrorMetric.fields[.environment] = .string(self.config.environment(systemInfo: self.systemInfo).name)
+            verificationErrorMetric.fields[.clientInfo] = .string(self.systemInfo.osInfo)
             if let featureID = self.featureIdentifier {
                 verificationErrorMetric.fields[.featureID] = .string(featureID)
             }

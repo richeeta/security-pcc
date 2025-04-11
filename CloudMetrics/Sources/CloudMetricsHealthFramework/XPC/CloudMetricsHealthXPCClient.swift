@@ -14,35 +14,35 @@
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
-import MantaAsyncXPC
+internal import CloudMetricsAsyncXPC
 
-public protocol CloudMetricsHealthXPCClientDelegateProtocol: AnyObject, Sendable {
+package protocol CloudMetricsHealthXPCClientDelegateProtocol: AnyObject, Sendable {
     func disconnected() async
 }
 
-public actor CloudMetricsHealthXPCClient {
-    private var connection: MantaAsyncXPCConnection?
+package actor CloudMetricsHealthXPCClient {
+    private var connection: CloudMetricsAsyncXPCConnection?
     private weak var delegate: CloudMetricsHealthXPCClientDelegateProtocol?
     
-    internal init(connection: MantaAsyncXPCConnection) async {
+    internal init(connection: CloudMetricsAsyncXPCConnection) async {
         self.connection = connection
         await self.connection?.handleConnectionInvalidated { _ in
             await self.disconnected()
         }
     }
 
-    public static func localConnection() async -> CloudMetricsHealthXPCClient {
+    package static func localConnection() async -> CloudMetricsHealthXPCClient {
         await self.init(
             connection: .connect(to: kCloudMetricsHealthXPCServiceName)
         )
     }
 
-    public func connect(delegate: CloudMetricsHealthXPCClientDelegateProtocol) async {
+    package func connect(delegate: CloudMetricsHealthXPCClientDelegateProtocol) async {
         self.delegate = delegate
         await self.connection?.activate()
     }
 
-    public func disconnect() async {
+    package func disconnect() async {
         if let connection = self.connection {
             self.connection = nil
             await self.delegate?.disconnected()
@@ -60,7 +60,7 @@ public actor CloudMetricsHealthXPCClient {
         }
     }
 
-    public func getHealthState() async throws -> CloudMetricsHealthState {
+    package func getHealthState() async throws -> CloudMetricsHealthState {
         guard let connection = self.connection else {
             throw CloudMetricsHealthError.disconnected
         }

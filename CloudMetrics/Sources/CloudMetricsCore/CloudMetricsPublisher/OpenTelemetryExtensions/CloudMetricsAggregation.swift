@@ -19,16 +19,19 @@
 //  Created by Andrea Guzzo on 3/23/24.
 //
 
-import OpenTelemetrySdk
-import os
+internal import CloudMetricsConstants
+@preconcurrency internal import OpenTelemetrySdk
+internal import os
 
-internal class CloudMetricsAggregation: Aggregation {
+internal final class CloudMetricsAggregation: Aggregation, Sendable {
     private let defaultHistogramBuckets: [Double]
     private let defaultHistogramAggregator: Aggregation
-    private var customHistogramsAggregators: [String:Aggregation] = [:]
-    private var logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsAggregation")
-    internal init(histogramBuckets: [Double]) {
+    private let customHistogramsAggregators: OSAllocatedUnfairLock<[String:Aggregation]> = .init(uncheckedState: [:])
+    private let metricOverrides: MetricOverrides
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsAggregation")
+    internal init(histogramBuckets: [Double], metricOverrides: MetricOverrides) {
         self.defaultHistogramBuckets = histogramBuckets
+        self.metricOverrides = metricOverrides
         if histogramBuckets.isEmpty {
             self.defaultHistogramAggregator = ExplicitBucketHistogramAggregation.instance
         } else {
@@ -36,11 +39,11 @@ internal class CloudMetricsAggregation: Aggregation {
         }
     }
 
-    public func createAggregator(descriptor: InstrumentDescriptor, exemplarFilter: ExemplarFilter) -> any StableAggregator {
+    package func createAggregator(descriptor: InstrumentDescriptor, exemplarFilter: ExemplarFilter) -> any StableAggregator {
         resolve(for: descriptor).createAggregator(descriptor: descriptor, exemplarFilter: exemplarFilter)
     }
 
-    public func isCompatible(with descriptor: InstrumentDescriptor) -> Bool {
+    package func isCompatible(with descriptor: InstrumentDescriptor) -> Bool {
         resolve(for: descriptor).isCompatible(with: descriptor)
     }
 
@@ -49,7 +52,7 @@ internal class CloudMetricsAggregation: Aggregation {
         case .counter, .upDownCounter, .observableCounter, .observableUpDownCounter:
             return SumAggregation.instance
         case .histogram:
-            if let aggregator = customHistogramsAggregators[instrument.name] {
+            if let aggregator = (customHistogramsAggregators.withLock{$0[instrument.name]}) {
                 return aggregator
             }
             var aggregator = defaultHistogramAggregator
@@ -58,7 +61,7 @@ internal class CloudMetricsAggregation: Aggregation {
             if !overrides.isEmpty {
                 let metricId = MetricID(label: instrument.name, dimensions: [:])
                 if let override = overrides[metricId] {
-                    logger.debug("Override found for \(instrument.name, privacy: .public))")
+                    logger.info("Override found for \(instrument.name, privacy: .public))")
                     switch override {
                     case .histogram(buckets: let buckets):
                         // let's create a custom aggregator honoring the overrides.
@@ -70,7 +73,8 @@ internal class CloudMetricsAggregation: Aggregation {
             }
             // cache the aggregator so we don't need to check overrides again
             // at publish time
-            customHistogramsAggregators[instrument.name] = aggregator
+            let resolvedAggregator = aggregator
+            customHistogramsAggregators.withLock { $0[instrument.name] = resolvedAggregator }
             return aggregator
         case .observableGauge:
             return LastValueAggregation.instance

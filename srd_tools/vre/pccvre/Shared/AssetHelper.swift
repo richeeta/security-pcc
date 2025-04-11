@@ -28,16 +28,18 @@ struct AssetHelper {
     //  SWReleases.Release.Metadata.assetVerifier()
     typealias AssetVerifier = SWReleaseMetadata.AssetVerifier
 
-    
-    //  Use temp folder for now;
-    //    otherwise ~/Library/Application Support/com.apple.security-research.pccvre/assets/
     let assetDir: URL
+    let purgeable: Bool // if true, set APFS.CacheDelete attribute on downloaded assets
     var releases: AssetHelper.ReleasesTable // stored in releases.plist
 
     static let logger = os.Logger(subsystem: applicationName, category: "AssetHelper")
 
-    init(directory: String) throws {
+    init(
+        directory: String,
+        purgeable: Bool = false
+    ) throws {
         self.assetDir = FileManager.fileURL(directory)
+        self.purgeable = purgeable
         if !FileManager.isDirectory(self.assetDir, resolve: true) {
             do {
                 try FileManager.default.createDirectory(at: self.assetDir,
@@ -54,33 +56,24 @@ struct AssetHelper {
     // addRelease adds provided release metadata (list of assets + darwin-init) to assetDir/,
     //  storing it as a .json file, and updates releases table to allow lookups by index
     mutating func addRelease(
-        index: UInt64, // log index entry
-        logEnvironment: TransparencyLog.Environment, // transparency log environment
-        releaseMetadata: SWReleaseMetadata
+        release: SWRelease,
+        logEnvironment: TransparencyLog.Environment
     ) throws {
-        try self.releases.add(index: index,
-                              logEnvironment: logEnvironment,
-                              releaseMetadata: releaseMetadata)
-        AssetHelper.logger.debug("added index=\(index, privacy: .public) to release table")
+        try self.releases.add(release: release,
+                              logEnvironment: logEnvironment)
+        AssetHelper.logger.debug("added index=\(release.index, privacy: .public) to release table")
     }
 
-    // loadRelease looks up index or releaseHash in releases table and returns the parsed
-    //  release metadata json file; returns nil if unavailable or otherwise can't parse
+    // loadRelease looks up index or releaseHash in releases table and returns the parsed set of
+    //  release tickets and the metadata json file; throws error if unavailable or otherwise can't parse
     func loadRelease(
         index: UInt64? = nil,
         releaseHash: Data? = nil,
         logEnvironment: TransparencyLog.Environment
-    ) -> SWReleaseMetadata? {
-        if let rel = self.releases.loadRelease(index: index,
-                                               releaseHash: releaseHash,
-                                               logEnvironment: logEnvironment)
-        {
-            AssetHelper.logger.debug("found release in table")
-            return rel
-        }
-
-        AssetHelper.logger.debug("did not find release in table")
-        return nil
+    ) throws -> (SWRelease.Tickets, SWReleaseMetadata) {
+        return try self.releases.loadRelease(index: index,
+                                             releaseHash: releaseHash,
+                                             logEnvironment: logEnvironment)
     }
 
     // downloadAsset retrieves url to assetDir/ (as either provided destName or last url component);
@@ -109,6 +102,12 @@ struct AssetHelper {
         do {
             let finalDest = try FileManager.moveFile(tmpDest, destPath)
             AssetHelper.logger.debug("moved to \(destPath, privacy: .public)")
+
+            if self.purgeable {
+                // mark download purgeable by APFS CacheDelete service
+                try? AssetHelper.self.setFilePurgeable(finalDest)
+            }
+
             return finalDest
         } catch {
             throw AssetHelperError("move downloaded asset: \(error)")
@@ -140,13 +139,7 @@ struct AssetHelper {
     //   the names from a public CDN) without a filename extension attached. Certain objects (esp for
     //   restore) must have it detected/set (such as via AssetHelper.fileType()) before passing in
     //   (also the case for CDN links).
-    //
-    // Authentication options can be set via envvars as outlined in "knox help download".
-    //
-    // Ex link: "knox://knox.sd.apple.com/download/sd/0a0de963b219...#name=CrystalServerSeed...dmg"
-    //
     private func downloadKnox(from: URL) async throws -> URL {
-        // quick&dirty implementation
         let knoxCmd = "/usr/local/bin/knox"
         let tempDest = try FileManager.tempDirectory(subPath: applicationName)
             .appendingPathComponent(UUID().uuidString)
@@ -194,6 +187,26 @@ struct AssetHelper {
     private func fullPath(_ name: String) -> URL {
         return self.assetDir.appending(path: name)
     }
+
+    // setFilePurgeable marks entry as "purgeable" by Centralized CacheDelete system
+    private static func setFilePurgeable(_ path: URL) throws {
+        let fd = open(path.path, O_RDONLY)
+        guard fd >= 0 else {
+            throw AssetHelperError("cannot open: \(String(cString: strerror(errno)))")
+        }
+        defer {
+            close(fd)
+        }
+
+        var flags = APFS_MARK_PURGEABLE | APFS_PURGEABLE_DATA_TYPE | APFS_PURGEABLE_MED_URGENCY
+        if FileManager.isDirectory(path) {
+            flags |= APFS_PURGEABLE_MARK_CHILDREN
+        }
+
+        guard ffsctl(fd, SF_APFSIOC_MARK_PURGEABLE(), &flags, 0) == 0 else {
+            throw AssetHelperError("mark purgeable: \(String(cString: strerror(errno)))")
+        }
+    }
 }
 
 extension AssetHelper {
@@ -218,6 +231,13 @@ extension AssetHelper {
             return self.sourcePath
                 .deletingLastPathComponent()
                 .appending(path: "release-\(entry.releaseHash).json")
+        }
+
+        // ticketsFile returns expected path of a tickets file corresponding to a releaseHash
+        private func ticketsFile(_ entry: Entry) -> URL {
+            return self.sourcePath
+                .deletingLastPathComponent()
+                .appending(path: "tickets-\(entry.releaseHash)")
         }
 
         // init either loads ReleasesTables from the file specified by 'from' or returns an empty table;
@@ -278,45 +298,70 @@ extension AssetHelper {
             index: UInt64? = nil,
             releaseHash: Data? = nil,
             logEnvironment: TransparencyLog.Environment
-        ) -> SWReleaseMetadata? {
-            if let relEntry = lookup(index: index,
-                                     releaseHash: releaseHash,
-                                     logEnvironment: logEnvironment)
-            {
-                let releaseFileURL = self.releaseFile(relEntry)
-                do {
-                    return try SWReleaseMetadata(from: releaseFileURL)
-                } catch {
-                    AssetHelper.logger.error("could not load release metadata file \(releaseFileURL.path, privacy: .public)")
-                }
+        ) throws -> (SWRelease.Tickets, SWReleaseMetadata) {
+            guard let relEntry = lookup(index: index,
+                                        releaseHash: releaseHash,
+                                        logEnvironment: logEnvironment)
+            else {
+                throw AssetHelperError("release index/hash not found")
             }
 
-            return nil
+            let ticketsFileURL = self.ticketsFile(relEntry)
+            let releaseFileURL = self.releaseFile(relEntry)
+
+            let tickets: SWRelease.Tickets
+            do {
+                let ticketData = try Data(contentsOf: ticketsFileURL)
+                tickets = try SWRelease.Tickets(serializedData: ticketData)
+            } catch {
+                throw AssetHelperError("load release tickets file \(ticketsFileURL.path): \(error)")
+            }
+
+            let metadata: SWReleaseMetadata
+            do {
+                metadata = try SWReleaseMetadata(from: releaseFileURL)
+            } catch {
+                throw AssetHelperError("load release metadata file \(releaseFileURL.path): \(error)")
+            }
+
+            return (tickets, metadata)
         }
 
-        // add stores (or replaces) release metadata (saved as json file) and adds entry to
-        //  release table for later lookup/retrieval
+        // add stores (or replaces) release tickets and metadata (as json files) and adds entry to
+        //  releases table for later lookup/retrieval
         mutating func add(
-            index: UInt64,
-            logEnvironment: TransparencyLog.Environment,
-            releaseMetadata: SWReleaseMetadata
+            release: SWRelease,
+            logEnvironment: TransparencyLog.Environment
         ) throws {
+            let index = release.index
             try self.remove(index: index,
-                            releaseHash: releaseMetadata.releaseHash,
+                            releaseHash: release.dataHash,
                             logEnvironment: logEnvironment)
             let newEntry = Entry(
                 index: index,
-                releaseHash: releaseMetadata.releaseHash?.hexString ?? "0",
+                releaseHash: release.dataHash.hexString,
                 logEnvironment: logEnvironment.rawValue
             )
 
-            let releaseFileURL = self.releaseFile(newEntry)
-            do {
-                let relJSON = try releaseMetadata.jsonString()
-                try relJSON.write(to: releaseFileURL, atomically: true, encoding: .utf8)
-                AssetHelper.logger.debug("saved release metadata file (\(releaseFileURL.path))")
-            } catch {
-                throw AssetHelperError("write release metadata file (\(releaseFileURL.path)): \(error)")
+            if let releaseMetadata = release.metadata {
+                let releaseFileURL = self.releaseFile(newEntry)
+                do {
+                    let relJSON = try releaseMetadata.jsonString()
+                    try relJSON.write(to: releaseFileURL, atomically: true, encoding: .utf8)
+                    AssetHelper.logger.debug("saved release metadata file (\(releaseFileURL.path))")
+                } catch {
+                    throw AssetHelperError("write release metadata file (\(releaseFileURL.path)): \(error)")
+                }
+            }
+
+            if let releaseTickets = release.tickets {
+                let ticketsFileURL = self.ticketsFile(newEntry)
+                do {
+                    try releaseTickets.serializedData.write(to: ticketsFileURL, options: .atomic)
+                    AssetHelper.logger.debug("saved release tickets file (\(ticketsFileURL.path))")
+                } catch {
+                    throw AssetHelperError("write release tickets file (\(ticketsFileURL.path)): \(error)")
+                }
             }
 
             self.entries.append(newEntry)
@@ -352,16 +397,16 @@ extension AssetHelper {
 
 extension AssetHelper {
     // FileType enumerates various image "types" likely to be encountered
-    enum FileType {
-        case unknown, aar, dmg, empty, gz, zip
+    enum FileType: String, CaseIterable {
+        case unknown, aar, dmg, empty, targz, ipsw
 
         // file extension associated with the types
         var ext: String {
             return switch self {
             case .aar: "aar"
             case .dmg: "dmg"
-            case .gz: "gz" // or tgz
-            case .zip: "ipsw"
+            case .targz: "tar.gz" // or tgz
+            case .ipsw: "ipsw"
             default: ""
             }
         }
@@ -369,6 +414,13 @@ extension AssetHelper {
 
     // fileType returns FileType based on first
     static func fileType(_ path: URL) throws -> FileType {
+        let pathExt = path.pathExtension.lowercased()
+        if !pathExt.isEmpty {
+            for ft in FileType.allCases where ft.ext == pathExt {
+                return ft
+            }
+        }
+
         let header = try AssetHelper.fileHeader(path)
         return AssetHelper.fileMagic(header)
     }
@@ -383,8 +435,9 @@ extension AssetHelper {
             ([0x00, 0x00, 0x00, 0x00], .dmg), // disk image
             ([0x62, 0x76, 0x78, 0x6e], .dmg),
             ([0x88, 0xd9, 0xc9, 0xc5], .dmg),
-            ([0x1f, 0x8b, 0x08, 0x00], .gz),
-            ([0x50, 0x4b, 0x03, 0x04], .zip), // ipsw
+            ([0x41, 0x45, 0x41, 0x31], .dmg), // AEA1 (treat as dmg)
+            ([0x1f, 0x8b, 0x08, 0x00], .targz), // (any gzip)
+            ([0x50, 0x4b, 0x03, 0x04], .ipsw), // (zip)
         ]
 
         return fileMagicSignatures.filter { sig in

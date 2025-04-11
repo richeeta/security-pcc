@@ -27,6 +27,7 @@ struct TrustedRequestError: Error {
         case failedToValidateAllAttestations
         case responseSummaryIndicatesFailure
         case responseSummaryIndicatesUnauthenticated
+        case responseSummaryIndicatesInternalError
         case responseSummaryIndicatesInvalidRequest
         case missingAttestationBundle
         case invalidAttestationBundle
@@ -50,6 +51,8 @@ struct TrustedRequestError: Error {
             return "ResponseSummaryIndicatesFailure"
         case .responseSummaryIndicatesUnauthenticated:
             return "ResponseSummaryIndicatesUnauthenticated"
+        case .responseSummaryIndicatesInternalError:
+            return "ResponseSummaryIndicatesInternalError"
         case .responseSummaryIndicatesInvalidRequest:
             return "ResponseSummaryIndicatesInvalidRequest"
         case .missingAttestationBundle:

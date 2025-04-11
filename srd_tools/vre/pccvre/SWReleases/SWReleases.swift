@@ -16,6 +16,7 @@
 //
 
 import Foundation
+import os
 
 private let fetchWindowSize: UInt64 = 100
 
@@ -33,61 +34,105 @@ public struct SWReleases: RandomAccessCollection {
     private var releases: [Release] = []
     public var count: Int { releases.count }
 
-    static let logger = TransparencyLog.logger
-    static var traceLog = TransparencyLog.traceLog
+    static var logger: Logger { TransparencyLog.logger }
+    static var traceLog: Bool { TransparencyLog.traceLog }
 
     init(
         environment: TransparencyLog.Environment,
         altKtInitEndpoint: URL? = nil,
-        tlsInsecure: Bool = false
+        tlsInsecure: Bool = false,
+        traceLog: Bool = false
     ) async throws {
         self.swlog = try await TransparencyLog(
             environment: environment,
             altKtInitEndpoint: altKtInitEndpoint,
-            tlsInsecure: tlsInsecure
+            tlsInsecure: tlsInsecure,
+            traceLog: traceLog
         )
     }
 
     @discardableResult
     mutating func fetchReleases(
         reqCount: UInt, // requested number of releases
-        startWindow: Int64? = nil, // log index search windows
-        endWindow: UInt64? = nil,
+        includeAll: Bool = false, // include expired & duplicate releases
+        searchRangeStart: Int64? = nil, // log index search windows
+        searchRangeEnd: UInt64? = nil,
+        batchSize: UInt64 = 100,
         altEndpoint: URL? = nil,
         tlsInsecure: Bool = false
     ) async throws -> Int {
-        var rels: [Release] = []
+        var releases: [Release] = []
         let tree = try await swlog.fetchLogTree()
         let head = try await swlog.fetchLogHead(logTree: tree)
+
+        let logIndexMax = head.size // last index in the log
+        // searchIndexHighest/searchIndexLowest are the index limits of the Transparency Log within
+        //   which the search remains.
+        //   - searchIndexHighest is capped to logIndexMax
+        //   - searchIndexLowest is relative to searchIndexHighest (if searchRangeStart < 0) or
+        //      absolute index, with floor at 0 (start of log)
+        let searchIndexHighest = UInt64(Swift.min(logIndexMax, searchRangeEnd ?? logIndexMax))
+        let searchIndexLowest: UInt64
+        if let searchRangeStart {
+            if searchRangeStart < 0 {
+                searchIndexLowest = Swift.max(0, searchIndexHighest - UInt64(-searchRangeStart))
+            } else {
+                searchIndexLowest = UInt64(searchRangeStart)
+            }
+        } else {
+            searchIndexLowest = 0
+        }
+        guard searchIndexLowest < searchIndexHighest else {
+            throw TransparencyLogError("invalid search window range")
+        }
+
+        // fetchWindowStart/Last is a sliding window (of upto batchSize) of indexes to retrieve
+        //  from the server; we start the fetchWindow at searchLastIndex and work -backwards- towards
+        //  searchIndexLowest, sliding the fetchWindow backwards to that point or have obtained
+        //  reqCount SWReleases entries obtained.
+        //
+        var fetchWindowLast = searchIndexHighest
+        var fetchWindowStart = Swift.max(searchIndexLowest,
+                                         fetchWindowLast - Swift.min(fetchWindowLast, batchSize))
+
         repeat {
-            let (leaves, lastPstart, lastPend) = try await swlog.fetchATLogLeaves(
-                logTree: tree,
-                logHead: head,
-                reqCount: reqCount,
-                startWindow: startWindow,
-                endWindow: endWindow,
-                windowSize: fetchWindowSize,
-                nodeDataType: ATLeafType.RELEASE,
-                altEndpoint: altEndpoint,
-                tlsInsecure: tlsInsecure
+            // while fetchLogLeaves can batch, it moves forward; when enumerating releases,
+            //  we generally want newer first, using smaller batches - additional filtering
+            //  here often has us going back for more (with a new connection)
+            let leaves = try await swlog.fetchLogLeaves(
+                type: TransparencyLog.ATLeaf.self,
+                tree: tree,
+                head: head,
+                start: fetchWindowStart,
+                end: fetchWindowLast,
+                batchSize: batchSize,
+                altEndpoint: altEndpoint
             )
 
-            for leaf in leaves {
-                guard leaf.nodeData.type == .RELEASE else {
-                    continue
-                }
-
+            for leaf in leaves where leaf.nodeData.type == .RELEASE {
                 if let rel = try? Release(leaf: leaf) {
-                    rels.append(rel)
+                    releases.append(rel)
                 }
             }
 
-            if lastPstart >= lastPend || lastPend == 0 { break }
-        } while rels.count < reqCount
+            if !includeAll {
+                // trim duplicate entries (same data hash; use latest instance)
+                releases = releases.sorted {
+                    $0 > $1
+                }.uniqued()
+            }
 
-        releases = rels.sorted {
+            fetchWindowLast = Swift.max(searchIndexLowest,
+                                        fetchWindowLast - Swift.min(fetchWindowLast, batchSize))
+            fetchWindowStart = Swift.max(searchIndexLowest,
+                                         fetchWindowStart - Swift.min(fetchWindowStart, batchSize))
+        } while releases.count < reqCount && fetchWindowLast > searchIndexLowest
+
+        releases = releases.sorted { // final sort of the batch
             $0 > $1
         }
+
+        self.releases = releases
         return releases.count
     }
 }

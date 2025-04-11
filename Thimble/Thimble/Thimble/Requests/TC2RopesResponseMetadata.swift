@@ -92,7 +92,7 @@ package struct TC2RopesResponseMetadata: Sendable, Codable {
     // We use this to know whether to set a rate limit. Because many errors allow
     // retry but without applying a new RateLimitConfig across the board.
     package var isAvailabilityConcern: Bool {
-        if case let .errorCode(errorCode) = self.receivedErrorCode {
+        if case .errorCode(let errorCode) = self.receivedErrorCode {
             switch errorCode {
             case .rateLimitReached,
                 .unknownWorkload,
@@ -121,6 +121,7 @@ package struct TC2RopesResponseMetadata: Sendable, Codable {
         }
     }
 
+    // 
     // A request is always retryable if a retry-after header is present
     // In the absence of retry-after header, the list of errors that are retryable are:
     //     DEADLINE_EXCEEDED (4), SETUP_REQUEST_TIMEOUT (2000)
@@ -148,7 +149,7 @@ package struct TC2RopesResponseMetadata: Sendable, Codable {
             return true
         }
 
-        if case let .errorCode(errorCode) = self.receivedErrorCode {
+        if case .errorCode(let errorCode) = self.receivedErrorCode {
             switch errorCode {
             case .setupRequestTimeout,
                 .decryptionKeyTimeout,

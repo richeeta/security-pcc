@@ -18,6 +18,18 @@ EA1937
 	"title": "darwin-init JSON Schema",
 	"description": "Schema describing darwin-init JSON configuration structure",
 	"type": "object",
+	"$defs": {
+		"uint8": {
+			"type": "number",
+			"minimum": 0,
+			"maximum": 255
+		},
+		"uint64": {
+			"type": "number",
+			"minimum": 0,
+			"maximum": 18446744073709551615
+		}
+	},
 	"properties": {
 		"ca-roots": {
 			"description": "CA root trust",
@@ -327,15 +339,15 @@ EA1937
 					"properties": {
 						"full_sampling_period_set": {
 							"description": "The full-system sampling period in nanoseconds.  To disable full-system sampling, specify zero. Sets the full-system sampling period attribute on a tailspin config object. The minimum sampling frequency for full sampling is 10ms on x86_64, 50ms on arm64 and 100ms on arm. It is an error to specify a full-system sampling period less than the minimum, unless you specify zero.",
-							"type": "uint64_t"
+							"$ref": "#/$defs/uint64"
 						},
 						"oncore_sampling_period_set": {
 							"description": "The on-core sampling period in nanoseconds.  To disable on-core sampling, specify zero. Sets the on-core sampling period attribute on a tailspin config object. The minimum sampling frequency for oncore sampling is 10ms on x86_64, and 20ms on arm64 and 50ms on arm. It is an error to specify an oncore sampling frequency lower than the minimum, unless you specify zero.",
-							"type": "uint64_t"
+							"$ref": "#/$defs/uint64"
 						},
 						"buffer_size_set": {
 							"description": "The buffer size in megabytes.  Must be greater than zero. Sets the buffer size attribute on a tailspin config object.",
-							"type": "size_t"
+							"$ref": "#/$defs/uint64"
 						},
 						"class_configs": {
 							"description": "Each class should be specified in a separate array entry.",
@@ -345,7 +357,7 @@ EA1937
 								"properties": {
 									"class_number": {
 										"description": "The class number to enable or disable.",
-										"type": "uint8_t"
+										"$ref": "#/$defs/uint8"
 									},
 									"class_enabled": {
 										"description": " A boolean value specifying whether to enable or disable the specified class. Specify true to enable the class or false to disable the class.",
@@ -359,18 +371,18 @@ EA1937
 											"properties": {
 												"subclass_number": {
 													"description": "The subclass number to enable or disable.",
-													"type": "uint8_t"
+													"$ref": "#/$defs/uint8"
 												},
 												"subclass_enabled": {
 													"description": "A boolean value specifying whether to enable or disable the  specified subclass. Specify true to enable the subclass or false to disable the subclass.",
 													"type": "boolean"
-												},
-												"required": ["subclass_number","subclass_enabled"]
-											}
+												}
+											},
+											"required": ["subclass_number", "subclass_enabled"]
 										}
-									},
-									"required": ["class_number","class_enabled"]
-								}
+									}
+								},
+								"required": ["class_number", "class_enabled"]
 							}
 						}
 					},

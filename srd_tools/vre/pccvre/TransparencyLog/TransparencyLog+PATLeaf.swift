@@ -37,11 +37,11 @@ extension TransparencyLog {
                 return nil
             }
 
-            guard let patNode = try? TxPB_PerApplicationTreeNode(serializedData: pb.nodeBytes) else {
+            guard let patNode = try? TxPB_PerApplicationTreeNode(serializedBytes: pb.nodeBytes) else {
                 return nil
             }
             
-            guard let logHead = try? TxPB_LogHead(serializedData: patNode.predecessorHead.object) else {
+            guard let logHead = try? TxPB_LogHead(serializedBytes: patNode.predecessorHead.object) else {
                 return nil
             }
 
@@ -54,11 +54,11 @@ extension TransparencyLog {
                 return nil
             }
 
-            guard let patNode = try? TxPB_PerApplicationTreeNode(serializedData: pb.nodeBytes) else {
+            guard let patNode = try? TxPB_PerApplicationTreeNode(serializedBytes: pb.nodeBytes) else {
                 return nil
             }
             
-            guard let logHead = try? TxPB_LogHead(serializedData: patNode.predecessorHead.object) else {
+            guard let logHead = try? TxPB_LogHead(serializedBytes: patNode.predecessorHead.object) else {
                 return nil
             }
 

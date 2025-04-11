@@ -14,7 +14,7 @@
 
 //  Copyright © 2023 Apple Inc. All rights reserved.
 
-@_implementationOnly import ArgumentParser
+import ArgumentParserInternal
 import CloudBoardJobAPI
 @_exported import CloudBoardJobCore
 import Foundation

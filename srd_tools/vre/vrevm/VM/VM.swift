@@ -66,6 +66,25 @@ class VM {
         bundle = VMBundle(bundleName: name, libraryBaseDir: dataDir)
     }
 
+    // awaitShutdown checks VM state as to whether it's stopped or paused (or error) or throws
+    //  error if hasn't reached this state within timeout interval
+    func awaitShutdown(timeout: TimeInterval) async throws {
+        guard isOpen else {
+            throw VMError("VM not open")
+        }
+
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while ![.error, .paused, .stopped].contains(vzVM!.state) {
+            if Date() > deadline {
+                throw VMError("timeout awaiting VM shutdown [\(vzVM!.state.rawValue)]")
+            }
+
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+
+        VM.logger.debug("VM halted")
+    }
+
     // rsdName returns the Remote Service Discovery name of the running VM; walks RSD devices
     //   of type "NCM" that are connected and matches VM's ECID against (suffix of)
     //   UniqueDeviceID
@@ -108,7 +127,7 @@ class VM {
 // VMError provides a general error wrapper for VirtualMachine operations
 struct VMError: Error, CustomStringConvertible {
     var message: String
-    var description: String { self.message }
+    var description: String { message }
 
     init(_ message: String) {
         VM.logger.error("\(message, privacy: .public)")

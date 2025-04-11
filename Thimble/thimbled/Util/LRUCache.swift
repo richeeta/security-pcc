@@ -22,12 +22,14 @@
 import CollectionsInternal
 import Foundation
 import PrivateCloudCompute
-import os.lock
+import Synchronization
 
 // This type is responsible for remembering the `maxCount` most recent elements
 // across restarts. It is used by the background prefetch activity to know which
 // workloads to prefetch for. `maxAge` specifies a TimeInterval beyond which
 // elements should be expired and discarded, which is accomplished by `trim`.
+
+private let lruFilename = "lrucache3.plist"
 
 package final class LRUCache<Value: Hashable & Sendable & Codable>: Sendable {
     private let maxCount: Int
@@ -35,7 +37,7 @@ package final class LRUCache<Value: Hashable & Sendable & Codable>: Sendable {
     private let storeURL: URL?
     private let encoder = PropertyListEncoder()
     private let decoder = PropertyListDecoder()
-    let logger = tc2Logger(forCategory: .Daemon)
+    let logger = tc2Logger(forCategory: .daemon)
 
     private struct DatedValue: Hashable & Sendable & Codable {
         var date: Date
@@ -46,19 +48,25 @@ package final class LRUCache<Value: Hashable & Sendable & Codable>: Sendable {
         var memCache: [DatedValue] = []
     }
 
-    private let state: OSAllocatedUnfairLock<State>
+    private let state: Mutex<State>
 
     package init(maxCount: Int, maxAge: TimeInterval, storeURL: URL?) {
         self.maxCount = maxCount
         self.maxAge = maxAge
         encoder.outputFormat = .binary
         if storeURL != nil {
-            self.storeURL = storeURL!.appending(path: "lrucache3.plist")
+            self.storeURL = storeURL!.appending(path: lruFilename)
         } else {
             self.storeURL = nil
         }
 
-        self.state = OSAllocatedUnfairLock(initialState: State())
+        self.state = Mutex(State())
+    }
+
+    static func migrate(from source: URL, to destination: URL) {
+        let sourceFile = source.appending(path: lruFilename)
+        let destinationFile = destination.appending(path: lruFilename)
+        moveDaemonStateFile(from: sourceFile, to: destinationFile)
     }
 
     private func trim(_ state: inout State, now: Date) {
@@ -123,12 +131,14 @@ package final class LRUCache<Value: Hashable & Sendable & Codable>: Sendable {
 
         do {
             let serialized = try Data(contentsOf: storeURL)
-            let cachedValues: [DatedValue]? = try decoder.decode([DatedValue].self, from: serialized)
-            if cachedValues == nil {
-                logger.log("found no entries in archive")
+            var cachedValues = try decoder.decode([DatedValue].self, from: serialized)
+            if cachedValues.count > self.maxCount {
+                logger.log("trimming archive, count=\(cachedValues.count), maxCount=\(self.maxCount)")
+                cachedValues = cachedValues.suffix(self.maxCount)
             }
-            state.withLock { state in
-                state.memCache = cachedValues ?? []
+
+            state.withLock { [cachedValues] state in
+                state.memCache = cachedValues
                 self.trim(&state, now: now)
             }
         } catch {

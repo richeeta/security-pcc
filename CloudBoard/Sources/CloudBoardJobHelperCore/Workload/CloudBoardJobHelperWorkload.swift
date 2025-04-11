@@ -18,10 +18,12 @@ import Foundation
 
 protocol CloudBoardJobHelperWorkload: Actor {
     var remotePID: Int? { get }
+    var abandoned: Bool { get async }
     func run() async throws
     func provideInput(_ data: Data?, isFinal: Bool) async throws
     func endOfInput() async throws
     func warmup(_ warmupData: WarmupData) async throws
     func parameters(_ parametersData: ParametersData) async throws
+    func abandon() async throws
     func teardown() async throws
 }

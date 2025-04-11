@@ -19,181 +19,153 @@
 //  Created by Andrea Guzzo on 9/28/23.
 //
 
+internal import CloudMetricsConstants
+package import CloudMetricsUtils
 import Foundation
-import GRPC
-import Logging
-import NIO
-import NIOHPACK
-import NIOSSL
-import OpenTelemetryApi
-import OpenTelemetryProtocolExporterCommon
-import OpenTelemetryProtocolExporterGrpc
-import OpenTelemetrySdk
-import os
+internal import GRPC
+private import Logging
+private import NIO
+private import NIOHPACK
+private import NIOSSL
+@preconcurrency import OpenTelemetryApi
+private import OpenTelemetryProtocolExporterCommon
+internal import OpenTelemetryProtocolExporterGrpc
+@preconcurrency package import OpenTelemetrySdk
+internal import os
 
-private let kDefaultOTLPHost = "localhost"
-private let kDefaultOTLPPort = 4_317
 
-internal class OpenTelemetryPublisher: CloudMetricsPublisher {
-    private let cloudMetricsConfiguration: CloudMetricsConfiguration
-    private let defaultDestination: CloudMetricsDestination
-    private let clientDestinations: [String: CloudMetricsDestination]
-    private var metricsStores: [String: (OpenTelemetryStore, StableMeterProviderSdk)] = [:]
-    private let collectorEndpoint: CloudMetricsOTEndpoint
-    private let metricsFilter: MetricsFilter
-    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "OpenTelemetryPublisher")
+package final class OpenTelemetryPublisher: CloudMetricsPublisher, Sendable {
 
-    internal init(configuration: CloudMetricsConfiguration, metricsFilter: MetricsFilter) throws {
-        self.cloudMetricsConfiguration = configuration
-
-        guard let defaultDestination = configuration.defaultDestination else {
-            throw ConfigurationError.defaultDestinationNotConfigured
-        }
-        self.defaultDestination = defaultDestination
-
-        clientDestinations = try configuration.clientDestinations()
-
-        self.metricsFilter = metricsFilter
-
-        collectorEndpoint = configuration.openTelemetryEndpoint ??
-            CloudMetricsOTEndpoint(hostname: kDefaultOTLPHost, port: kDefaultOTLPPort, disableMtls: true)
-
-        for (_, destination) in clientDestinations {
-            try setupConnections(destination: destination)
-        }
-
-        // make sure the default destination is also initialized
-        try setupConnections(destination: defaultDestination)
+    private enum State {
+        case stopped
+        case starting
+        case running(shutdownPromise: Promise<Void, Error>)
     }
 
-    private func setupConnections(destination: CloudMetricsDestination) throws {
-        if metricsStores[destination.id] != nil {
-            // nothing to do, this destination has been already configured
-            return
+    private let configuration: Configuration
+    private let metricsStores: [String: (OpenTelemetryStore, StableMeterProviderSdk)]
+    private let metricsFilter: MetricsFilter
+    /// Continuation used to pass metric data to the exporter, whose job is usually to talk gRPC.
+    private let metricDataContinuation: AsyncStream<(Configuration.Destination, [StableMetricData])>.Continuation
+
+    private let metricReaders: [OpenTelemetryPeriodicMetricReader]
+
+    private let state: OSAllocatedUnfairLock<State> = .init(initialState: .stopped)
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "OpenTelemetryPublisher")
+
+    package init(configuration: Configuration,
+                 metricsFilter: MetricsFilter,
+                 metricDataContinuation: AsyncStream<(Configuration.Destination, [StableMetricData])>.Continuation) {
+        self.configuration = configuration
+        self.metricsFilter = metricsFilter
+        self.metricDataContinuation = metricDataContinuation
+
+        var allDestinations = configuration.destinations
+        allDestinations.append(configuration.defaultDestination)
+
+        var metricsStores: [String: (OpenTelemetryStore, StableMeterProviderSdk)] = [:]
+        var metricReaders: [OpenTelemetryPeriodicMetricReader] = []
+
+        for destination in allDestinations {
+            let metricsReader = OpenTelemetryPeriodicMetricReader(
+                destination: destination,
+                metricContinuation: metricDataContinuation)
+            metricReaders.append(metricsReader)
+
+            let metricOverrides = MetricOverrides()
+            let cloudMetricsAggregation = CloudMetricsAggregation(histogramBuckets: configuration.defaultHistogramBuckets, metricOverrides: metricOverrides)
+            let metricsView = StableView.builder().withAggregation(aggregation: cloudMetricsAggregation).build()
+            let meterProvider = StableMeterProviderSdk.builder()
+                .registerMetricReader(reader: metricsReader)
+                .setResource(resource:  EnvVarResource.get())
+                .registerView(selector: InstrumentSelector.builder().setInstrument(name: ".*").build(), view: metricsView)
+                .build()
+            let store = OpenTelemetryStore(
+                meter: meterProvider.meterBuilder(name: "CloudMetrics").build(),
+                globalLabels: self.configuration.globalLabels,
+                metricOverrides: metricOverrides)
+
+            // We have an object cycle metricsReader->store->meterProvider->metricsReader
+            // This is likely causing a slow memory leak and is awkward.
+            // We should tidy this up.
+            metricsReader.store.withLock { $0 = store }
+            metricsStores[destination.id] = (store, meterProvider)
         }
-
-        var clientConfiguration = ClientConnection.Configuration.default(
-            target: .hostAndPort(collectorEndpoint.hostname, collectorEndpoint.port),
-            eventLoopGroup: MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        )
-        if let privateKey = destination.certificates.mtlsPrivateKey, collectorEndpoint.disableMtls == false {
-            let certificateChain = destination.certificates.mtlsCertificateChain.map {
-                NIOSSLCertificateSource.certificate($0)
-            }
-            let tlsConfig = GRPCTLSConfiguration.makeClientConfigurationBackedByNIOSSL(
-                certificateChain: certificateChain,
-                privateKey: .privateKey(privateKey),
-                trustRoots: destination.certificates.mtlsTrustRoots,
-                certificateVerification: .noHostnameVerification)
-            clientConfiguration.tlsConfiguration = tlsConfig
-        } else {
-            logger.info("No mTLS configuration for destination \(destination.id, privacy: .private)")
-        }
-        let client = ClientConnection(configuration: clientConfiguration)
-
-        logger.debug("Setup OTLP client connection: \(String(describing: client), privacy: .public)")
-        // Initialize OpenTelemtry
-        let otlpHeaders: [(String, String)] =
-        [
-            ("X-MOSAIC-WORKSPACE", destination.workspace),
-            ("X-MOSAIC-NAMESPACE", destination.namespace),
-        ]
-        let otlpConfiguration = OtlpConfiguration(headers: otlpHeaders)
-        let otlpMetricExporter = OpenTelemetryMetricExporter(
-            channel: client,
-            config: otlpConfiguration,
-            aggregationTemporalitySelector: AggregationTemporality.deltaPreferred(),
-            metricsFilter: metricsFilter,
-            destination: destination)
-
-        let metricsReader = OpenTelemetryPeriodicMetricReader(exporter: otlpMetricExporter,
-                                                              exportInterval: TimeInterval(destination.publishInterval))
-        let cloudMetricsAggregation = CloudMetricsAggregation(histogramBuckets: cloudMetricsConfiguration.defaultHistogramBuckets)
-        let metricsView = StableView.builder().withAggregation(aggregation: cloudMetricsAggregation).build()
-
-        let meterProvider = StableMeterProviderSdk.builder()
-            .registerMetricReader(reader: metricsReader)
-            .registerView(selector: InstrumentSelector.builder().setInstrument(name: ".*").build(), view: metricsView)
-            .build()
-        let store = OpenTelemetryStore(
-            meter: meterProvider.meterBuilder(name: "CloudMetrics").build(),
-            globalLabels: self.cloudMetricsConfiguration.globalLabels)
-        metricsReader.store = store
-        metricsStores[destination.id] = (store, meterProvider)
-
-        if cloudMetricsConfiguration.localCertificateConfig == nil, collectorEndpoint.disableMtls == false {
-            try registerCertificateRenewalHandler(destination: destination)
-        }
+        self.metricReaders = metricReaders
+        self.metricsStores = metricsStores
     }
 
     internal func getMetricsStore(for client: String) throws -> MetricsStore? {
         // use the default destination if none is configured for this client.
         let destination = getDestination(for: client)
-
         guard let (store, _) = metricsStores[destination.id] else {
             // There must always be a default store and a client must always point to one.
             logger.error("Could not find metrics store. client='\(client, privacy: .public)' destination='\(destination.id, privacy: .private)'")
             return nil
         }
-
         return store
     }
 
-    internal func getDestination(for client: String) -> CloudMetricsDestination {
-        clientDestinations[client] ?? defaultDestination
+    internal func getDestination(for client: String) -> Configuration.Destination {
+        self.configuration.destinations.first { $0.clients.contains(client) } ?? self.configuration.defaultDestination
     }
 
-    internal func run() async throws {
-        // Opentelemtry handles publishing internally (using its PushMetricController and
-        // running the OtlpMetricExporter we pass to the meterProvider).
-        return await withUnsafeContinuation { _ in }
+    package func run() async throws {
+        try await self.run(runningPromise: nil)
     }
 
-    internal func shutdown() async throws {
-        metricsStores.removeAll()
-    }
-
-    private func registerCertificateRenewalHandler(destination: CloudMetricsDestination) throws {
-        logger.debug("Setting up RenewCertificate callback")
-        let currentCert = destination.certificates.mtlsCertificateChain[0]
-        let certExpiryHandler = try NICCertExpiryHandler() { newCert in
-            self.logger.debug("""
-                RenewCertificate callback called. \
-                Reconfiguring destination: \(String(describing: destination), privacy: .private).
-                """)
-
-            guard let (_, meterProvider) = self.metricsStores[destination.id] else {
-                throw OpenTelemetryStoreError.noMeterForDestination(destinationID: destination.id)
+    package func run(runningPromise: Promise<Void, Error>? = nil) async throws {
+        try self.state.withLock { state in
+            switch state {
+            case .stopped: state = .starting
+            case .starting, .running: throw CloudMetricsError.invalidStateTransition
             }
-
-            if meterProvider.forceFlush() == .failure {
-                self.logger.error("Can't flush metrics before cert renewal")
-            }
-
-            if meterProvider.shutdown() == .failure {
-                self.logger.error("Can't shutdown the meterProvider before cert renewal")
-            }
-
-            guard let privateKey = newCert.mtlsPrivateKey else {
-                throw NarrativeIdentityError.privateKeyMissing("newCert doesn't contain a private key")
-            }
-
-            let newCertConfig = CloudMetricsCertConfig(mtlsPrivateKey: privateKey,
-                                                       mtlsCertificateChain: newCert.mtlsCertificateChain,
-                                                       mtlsTrustRoots: newCert.mtlsTrustRoots,
-                                                       hostName: newCert.hostName)
-
-            self.metricsStores[destination.id] = nil
-            destination.updateCertificates(newCertConfig)
-            try self.setupConnections(destination: destination)
-
-            self.logger.debug("""
-                Successfully renewed the certificate for destination: \(String(describing: destination), privacy: .private).
-                """)
         }
-        certExpiryHandler.registerCertRenewalNotification()
+
+        let shutdownPromise = Promise<Void, Error>()
+
+        defer {
+            logger.log("OpenTelemetry publisher stopped")
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for reader in self.metricReaders {
+                group.addTask {
+                    try await reader.run()
+                }
+            }
+            group.addTask {
+                try await withTaskCancellationHandler(operation: {
+                    try await Future(shutdownPromise).value
+                }, onCancel: {
+                    self.logger.log("OpenTelemetryPublisher cancelled")
+                    self.state.withLock { $0 = .stopped }
+                    shutdownPromise.fail(with: CancellationError())
+                })
+            }
+            self.state.withLock { $0 = .running(shutdownPromise: shutdownPromise) }
+            runningPromise?.succeed()
+            defer {
+                group.cancelAll()
+            }
+            try await group.next()
+        }
+    }
+
+    package func shutdown() throws {
+        try self.state.withLock { state in
+            switch state {
+            case .stopped, .starting:
+                logger.error("Invalid state to begin OpenTelemetryPublusher shutdown")
+                throw CloudMetricsError.invalidStateTransition
+            case .running(let promise):
+                logger.log("OpenTelemetry publisher shutting down")
+                for (_, provider) in self.metricsStores.values {
+                    _ = provider.shutdown()
+                }
+                state = .stopped
+                promise.succeed()
+            }
+        }
     }
 }
-
-// Sendability is ensured by synchronising internally.
-extension OpenTelemetryPublisher: @unchecked Sendable {}

@@ -101,9 +101,9 @@ class CryptexCache {
 				guard let extractedCryptexPath = await LibCryptex.extractCryptex(
 					at: downloadedCryptex.path,
 					url: config.url,
-					dawToken: config.dawToken,
-					wgUsername: config.wgUsername,
-					wgToken: config.wgToken,
+                    dawToken: config.dawToken?.string,
+                    wgUsername: config.wgUsername,
+                    wgToken: config.wgToken?.string,
 					altCDN: config.alternateCDNHost,
 					retries: config.networkRetryCount,
 					aeaDecryptionParams: config.aeaDecryptionParams) else {
@@ -211,9 +211,9 @@ class CryptexCache {
 			guard let extractedCryptexPath = await LibCryptex.extractCryptex(
 				at: finalArchivePath,
 				url: config.url,
-				dawToken: config.dawToken,
-				wgUsername: config.wgUsername,
-				wgToken: config.wgToken,
+                dawToken: config.dawToken?.string,
+                wgUsername: config.wgUsername,
+                wgToken: config.wgToken?.string,
 				altCDN: config.alternateCDNHost,
 				retries: config.networkRetryCount,
 				aeaDecryptionParams: config.aeaDecryptionParams) else {
@@ -257,7 +257,7 @@ class CryptexCache {
 			throw CryptexCache.Error.failedToConvertDigestToSymmetricKey(digest)
 		}
 
-		return SymmetricKey(data: SHA256.hash(data: Data(bytes)))
+		return SymmetricKey(data: Data(bytes))
 	}
 
 	struct CacheItemInfo {

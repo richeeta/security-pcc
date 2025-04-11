@@ -25,7 +25,8 @@ extension CLI.ReleaseCmd {
     struct ReleaseListCmd: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "list",
-            abstract: "Display list of releases in the Private Cloud Compute Transparency Log."
+            abstract: "Display list of releases in the Private Cloud Compute Transparency Log.",
+            discussion: "Each release is represented by a SW Release Log index and a (SHA256) digest of the aggregate manifest tickets that make up the components."
         )
 
         @OptionGroup var globalOptions: CLI.globalOptions
@@ -34,16 +35,19 @@ extension CLI.ReleaseCmd {
         @Option(name: [.customLong("count"), .customShort("c")], help: "Releases to enumerate.")
         var reqCount: UInt = defaultReleaseCount
 
+        @Flag(name: [.customLong("all")], help: "Include expired & duplicate releases in output.")
+        var includeAll: Bool = false
+
         @Option(name: [.customLong("startWindow"), .customLong("start")],
                 help: "Start log search window (< 0 from last/end; >= 0 from first).")
         var startWindow: Int64?
 
         @Option(name: [.customLong("endWindow"), .customLong("end")],
-                help: "End log search window")
+                help: "End log search window.")
         var endWindow: UInt64?
 
         @Flag(name: [.customLong("detail")],
-              help: "Include details in output table (or complete payloads with --json).")
+              help: "Include details in output table.")
         var showDetails: Bool = false
 
         @Flag(name: [.customLong("json")],
@@ -60,62 +64,6 @@ extension CLI.ReleaseCmd {
             }
         }
 
-        // releaseInfo provides simple representation of a SW Release entry from the Transparency Log
-        //   for display as json output (and logging)
-        private struct releaseInfo: Codable {
-            struct tickets: Codable {
-                var ap: String
-                var code: [String] = []
-                var data: [String] = []
-            }
-
-            let index: UInt64
-            let dataHash: String
-            let expireTime: UInt64 // unix epoch time
-            let tickets: tickets
-            let createTime: UInt64? // unix epoch time
-            let rawData: Data?
-            let metadata: String? // json
-
-            init(
-                _ rel: SWRelease,
-                includePayloads: Bool = false // include tickets and metadata payloads in output
-            ) {
-                self.index = rel.index
-                self.dataHash = rel.dataHash.hexString
-                self.expireTime = rel.nodeData.expiryMs / 1000
-                self.rawData = includePayloads ? rel.rawData : nil
-
-                var relTickets = releaseInfo.tickets(
-                    ap: rel.apManifest!.description
-                )
-
-                if let cryptexManifests = rel.cryptexManifests {
-                    for cM in cryptexManifests {
-                        if cM.isDataCryptex() {
-                            relTickets.data.append(cM.description)
-                        } else {
-                            relTickets.code.append(cM.description)
-                        }
-                    }
-                }
-
-                self.tickets = relTickets
-                var createTime: UInt64? = nil
-                var metadata: String? = nil
-
-                if let relMD = rel.metadata {
-                    metadata = includePayloads ? try? relMD.jsonString() : nil
-                    if let pDate = relMD.timestamp {
-                        createTime = UInt64(pDate.timeIntervalSince1970)
-                    }
-                }
-
-                self.createTime = createTime
-                self.metadata = metadata
-            }
-        }
-
         func run() async throws {
             CLI.setupDebugStderr(debugEnable: globalOptions.debugEnable)
 
@@ -128,17 +76,19 @@ extension CLI.ReleaseCmd {
             var swlog = try await SWReleases(
                 environment: logEnvironment,
                 altKtInitEndpoint: swlogOptions.ktInitEndpoint,
-                tlsInsecure: swlogOptions.tlsInsecure
+                tlsInsecure: swlogOptions.tlsInsecure,
+                traceLog: swlogOptions.traceLog
             )
 
             try await swlog.fetchReleases(
                 reqCount: reqCount,
-                startWindow: startWindow,
-                endWindow: endWindow
+                includeAll: includeAll,
+                searchRangeStart: startWindow,
+                searchRangeEnd: endWindow
             )
 
             guard swlog.count > 0 else {
-                throw CLIError("no matching releases found")
+                throw CLIError("no matching\(includeAll ? "" : "/unexpired") releases found")
             }
 
             let relCount = min(UInt(swlog.count), reqCount)
@@ -146,39 +96,20 @@ extension CLI.ReleaseCmd {
                 print("Found \(relCount) release\(relCount != 1 ? "s" : ""):\n")
             }
 
-            var swReleases: [releaseInfo] = []
+            var swReleases: [ReleaseInfo] = []
             for rel in swlog[..<Int(relCount)] {
-                let relInfo = releaseInfo(rel, includePayloads: showDetails)
+                let relInfo = await ReleaseInfo(rel)
                 swReleases.append(relInfo)
 
                 if jsonOutput { // for --json output, print everything at the end
                     continue
                 }
 
-                print("\(String(format: "%8d", rel.index)): \(relInfo.dataHash)")
+                print("\(String(format: "%8d", rel.index)): \(relInfo.dataHash)\(relInfo.statusDescription)")
 
                 if showDetails {
-                    print("          [expires: \(dateAsString(relInfo.expireTime))]")
-                    if let pDate = relInfo.createTime {
-                        print("          [created: \(dateAsString(pDate))]")
-                    } else {
-                        // no metadata available
-                        print("          [not published]")
-                    }
-
-                    print("     Tickets")
-                    print("           OS: \(relInfo.tickets.ap)")
-                    if !relInfo.tickets.code.isEmpty || !relInfo.tickets.data.isEmpty {
-                        print("       Cryptexes")
-                        for c in relInfo.tickets.code {
-                            print("         Code: \(c)")
-                        }
-                        for c in relInfo.tickets.data {
-                            print("         Data: \(c)")
-                        }
-                    }
-
                     print()
+                    print(relInfo.printableString(prefix: "    "))
                 }
             }
 

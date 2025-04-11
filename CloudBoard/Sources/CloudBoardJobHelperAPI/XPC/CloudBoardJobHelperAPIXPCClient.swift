@@ -61,14 +61,19 @@ extension CloudBoardJobHelperAPIXPCClient {
 }
 
 extension CloudBoardJobHelperAPIXPCClient: CloudBoardJobHelperAPIClientToServerProtocol {
-    public func invokeWorkloadRequest(_ request: InvokeWorkloadRequest) async throws {
+    public func invokeWorkloadRequest(_ request: CloudBoardDaemonToJobHelperMessage) async throws {
         try await self.connection?
-            .send(CloudBoardJobHelperAPIXPCClientToServerMessages.InvokeWorkload(request: request))
+            .send(CloudBoardJobHelperAPIXPCClientToServerMessages.InvokeWorkload(message: request))
     }
 
     public func teardown() async throws {
         try await self.connection?
             .send(CloudBoardJobHelperAPIXPCClientToServerMessages.Teardown())
+    }
+
+    public func abandon() async throws {
+        try await self.connection?
+            .send(CloudBoardJobHelperAPIXPCClientToServerMessages.Abandon())
     }
 }
 
@@ -82,8 +87,8 @@ extension CloudBoardJobHelperAPIXPCClient: CloudBoardJobHelperAPIClientProtocol 
     }
 
     internal func configureHandlers(_ handlers: inout CloudBoardAsyncXPCConnection.MessageHandlerStore) {
-        handlers.register(CloudBoardJobHelperAPIXPCServerToClientMessages.WorkloadResponse.self) { request in
-            try await self.delegate?.sendWorkloadResponse(request.response)
+        handlers.register(CloudBoardJobHelperAPIXPCServerToClientMessages.WorkloadResponse.self) { response in
+            try await self.delegate?.sendWorkloadResponse(response.message)
             return ExplicitSuccess()
         }
     }

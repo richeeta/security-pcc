@@ -235,7 +235,7 @@ extension HistogramBuckets {
         25,
         30,
     ]
-    fileprivate static let requestFielderAllocationTime: Self = [
+    fileprivate static let jobHelperInstanceAllocationTime: Self = [
         0,
         0.005,
         0.01,
@@ -296,6 +296,10 @@ extension HistogramBuckets {
 
 enum Metrics {
     enum CloudBoardDaemon {
+        enum DimensionKey: String, RawRepresentable {
+            case activeRequests
+        }
+
         struct CBJobHelperExitCounter: ExitCounter {
             static let label: MetricLabel = "\(prefix)_cb_jobhelper_process_exit"
             var dimensions: MetricDimensions<DefaultExitDimensionKeys>
@@ -305,9 +309,6 @@ enum Metrics {
         struct DrainCompletionTimeHistogram: Histogram {
             static let label: MetricLabel = "\(prefix)_drain_time_seconds"
             static let buckets: HistogramBuckets = .drainCompletionTime
-            enum DimensionKey: String, RawRepresentable {
-                case activeRequests
-            }
 
             var dimensions: MetricDimensions<DimensionKey>
             var value: Double
@@ -319,9 +320,16 @@ enum Metrics {
                 ]
             }
         }
+
+        struct DrainStartCounter: Counter {
+            static let label: MetricLabel = "\(prefix)_drain_started_total"
+
+            var action: CounterAction
+            var dimensions: MetricDimensions<DimensionKey>
+        }
     }
 
-    enum RequestFielder {
+    enum JobHelperInstance {
         struct CloudAppTerminateFailureCounter: Counter {
             static let label: MetricLabel = "\(prefix)_cloud_app_terminate_failure"
             var action: CounterAction
@@ -392,14 +400,14 @@ enum Metrics {
         }
     }
 
-    enum RequestFielderManager {
+    enum JobHelperInstanceProvider {
         struct PrewarmedInstancesDiedTotal: Counter {
-            static let label: MetricLabel = "\(prefix)_prewarmed_instances_died_total"
+            static let label: MetricLabel = "\(prefix)_prewarmed_jobhelper_died_total"
             var action: CounterAction
         }
 
         struct PrewarmedPoolSizeGauge: Gauge {
-            static let label: MetricLabel = "\(prefix)_prewarm_request_fielder_pool_size"
+            static let label: MetricLabel = "\(prefix)_prewarm_jobhelper_pool_size"
 
             enum DimensionKey: String, RawRepresentable {
                 case configuredSize
@@ -422,7 +430,7 @@ enum Metrics {
         }
 
         struct FailedToAllocateTotal: Counter {
-            static let label: MetricLabel = "\(prefix)_failed_to_allocate_request_fielder"
+            static let label: MetricLabel = "\(prefix)_failed_to_allocate_jobhelper"
             enum DimensionKey: String, RawRepresentable {
                 case retryCount
             }
@@ -438,14 +446,39 @@ enum Metrics {
             }
         }
 
-        struct TimeToAllocateRequestFielderHistogram: Histogram {
-            static let label: MetricLabel = "\(prefix)_time_to_allocate_request_fielder_histogram"
+        struct TimeToAllocateJobHelperInstanceHistogram: Histogram {
+            static let label: MetricLabel = "\(prefix)_time_to_allocate_jobhelper_histogram"
             enum DimensionKey: String, RawRepresentable {
                 case prewarmingEnabled
                 case prewarmedPoolSize
             }
 
-            static var buckets: HistogramBuckets = .requestFielderAllocationTime
+            static var buckets: HistogramBuckets = .jobHelperInstanceAllocationTime
+            var dimensions: MetricDimensions<DimensionKey>
+            var value: Double
+
+            init(
+                duration: Duration,
+                prewarmingEnabled: Bool,
+                prewarmedPoolSize: Int
+            ) {
+                self.value = duration.seconds
+                self.dimensions = [
+                    .prewarmingEnabled: "\(prewarmingEnabled)",
+                    .prewarmedPoolSize: "\(prewarmedPoolSize)",
+                ]
+            }
+        }
+
+        struct TimeToLaunchJobHelperInstanceHistogram: Histogram {
+            static let label: MetricLabel = "\(prefix)_time_to_launch_jobhelper_histogram"
+            enum DimensionKey: String, RawRepresentable {
+                case prewarmingEnabled
+                case prewarmedPoolSize
+            }
+
+            // the same time buckets as used for time to allocate seem appropriate here
+            static var buckets: HistogramBuckets = .jobHelperInstanceAllocationTime
             var dimensions: MetricDimensions<DimensionKey>
             var value: Double
 
@@ -463,7 +496,7 @@ enum Metrics {
         }
 
         struct WaitedForCreationTotal: Counter {
-            static let label: MetricLabel = "\(prefix)_request_fielder_waited_for_creation_total"
+            static let label: MetricLabel = "\(prefix)_jobhelper_waited_for_creation_total"
             enum DimensionKey: String, RawRepresentable {
                 case prewarmedPoolSize
             }
@@ -479,29 +512,29 @@ enum Metrics {
             }
         }
 
-        struct AttemptsToAllocateRequestFielderHistogram: Histogram {
-            static let label: MetricLabel = "\(prefix)_attempts_to_allocate_request_fielder_histogram"
+        struct AttemptsToAllocateJobHelperInstanceHistogram: Histogram {
+            static let label: MetricLabel = "\(prefix)_attempts_to_allocate_jobhelper_histogram"
             static var buckets: HistogramBuckets = .prewarmAllocateCount
             var value: Int
         }
 
         struct FailedToCreateTotal: Counter {
-            static let label: MetricLabel = "\(prefix)_request_fielder_create_failed_total"
+            static let label: MetricLabel = "\(prefix)_jobhelper_create_failed_total"
             var action: CounterAction
         }
 
         struct ReclaimedPrewarmedTotal: Counter {
-            static let label: MetricLabel = "\(prefix)_request_fielder_reclaimed_prewarmed_total"
+            static let label: MetricLabel = "\(prefix)_jobhelper_reclaimed_prewarmed_total"
             var action: CounterAction
         }
 
         struct FailedToReclaimTotal: Counter {
-            static let label: MetricLabel = "\(prefix)_request_fielder_reclaim_failed_total"
+            static let label: MetricLabel = "\(prefix)_jobhelper_reclaim_failed_total"
             var action: CounterAction
         }
 
         struct PlaceholderDelegateWorkloadResponseInvoked: Counter {
-            static let label: MetricLabel = "\(prefix)_placeholder_request_fielder_delegate_invoked_total"
+            static let label: MetricLabel = "\(prefix)_placeholder_jobhelper_delegate_invoked_total"
             var action: CounterAction
         }
     }

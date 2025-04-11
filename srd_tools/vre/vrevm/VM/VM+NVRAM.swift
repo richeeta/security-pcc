@@ -26,6 +26,7 @@ extension VM {
         private let auxStorage: VZMacAuxiliaryStorage
 
         init(auxStorageURL: URL) throws {
+            VM.logger.debug("NVRAM: open auxiliaryStorage: \(auxStorageURL.path, privacy: .public)")
             guard FileManager.isRegularFile(auxStorageURL, resolve: true) else {
                 throw VMError("auxiliaryStorage file not found (as file)")
             }

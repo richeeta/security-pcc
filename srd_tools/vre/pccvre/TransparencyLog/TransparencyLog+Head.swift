@@ -53,6 +53,7 @@ extension TransparencyLog {
         init(
             endpoint: URL, // KTInitBag: at-researcher-log-head
             tlsInsecure: Bool = false,
+            useIdentity: Bool = false,
             logTree: TxPB_ListTreesResponse.Tree,
             appCerts: [SecCertificate]?,
             requestUUID: UUID = UUID()
@@ -64,15 +65,15 @@ extension TransparencyLog {
                 builder.requestUuid = requestUUID.uuidString
             }
 
-            let (respData, _) = try await postPBURL(
-                logger: TransparencyLog.traceLog ? TransparencyLog.logger : nil,
+            let (respData, _) = try await TransparencyLog.urlPostProtbuf(
                 url: endpoint,
                 tlsInsecure: tlsInsecure,
+                useIdentity: useIdentity,
                 requestBody: logHeadReq.serializedData(),
                 headers: [TransparencyLog.requestUUIDHeader: requestUUID.uuidString]
             )
 
-            let response = try TxPB_LogHeadResponse(serializedData: respData)
+            let response = try TxPB_LogHeadResponse(serializedBytes: respData)
             if response.status != .ok {
                 throw TransparencyLogError("response: status=\(response.status.rawValue)")
             }
@@ -97,7 +98,7 @@ extension TransparencyLog {
               }
              */
 
-            self.node = try TxPB_LogHead(serializedData: signedObj.data)
+            self.node = try TxPB_LogHead(serializedBytes: signedObj.data)
 
             guard application == logTree.application, treeID == logTree.treeID else {
                 throw TransparencyLogError("logHead application/treeID does not match request")

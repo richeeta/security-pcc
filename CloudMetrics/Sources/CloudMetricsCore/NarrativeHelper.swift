@@ -19,13 +19,16 @@
 //  Created by Dhanasekar Thangavel on 1/10/23.
 //
 
-import CloudMetricsFramework
-import NIOCore
-import NIOSSL
-import os
-import libnarrativecert
-import MobileGestaltPrivate
-import notify
+internal import CloudMetricsConstants
+internal import GRPC
+// libnarrartivecert doesn't exist on macOS. By weak linking here we can still run on macOS and not use this functionality.
+@_weakLinked package import libnarrativecert
+private import MobileGestaltPrivate
+internal import NIOCore
+internal import NIOSSL
+private import notify
+internal import os
+@preconcurrency package import Security
 
 // swiftlint:disable file_length
 private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "NarrativeHelper")
@@ -64,72 +67,6 @@ internal enum NarrativeSignError: LocalizedError {
     }
 }
 
-// callback function signature for certificate renewal callback that client can register to.
-internal typealias RenewCertificateCallback = (_ newCert: CloudMetricsCertConfig ) async throws -> Void
-internal typealias CertExpiryCallback = () async -> Void
-internal typealias CertExpiryContinuation = AsyncStream<CertExpiryCallback>.Continuation
-
-internal class NICCertExpiryHandler {
-    private let serialQueue: DispatchQueue
-    private let renewCallback: RenewCertificateCallback
-    private let logger: Logger
-    private let clientStream: AsyncStream<CertExpiryCallback>
-    private let clientStreamContinuation: AsyncStream<CertExpiryCallback>.Continuation
-    private var token : Int32 = 0
-    
-    internal init(
-        renewCallback: @escaping RenewCertificateCallback
-    ) throws {
-        self.serialQueue = DispatchQueue(label: "com.apple.acdc.cloudmetricsd.narrativedispatch", qos: .userInitiated)
-        self.renewCallback = renewCallback
-        self.logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "NarrativeHelper")
-        // swiftlint:disable:next implicitly_unwrapped_optional
-        var continuation: AsyncStream<CertExpiryCallback>.Continuation! = nil
-        self.clientStream = AsyncStream<CertExpiryCallback> { continuation = $0 }
-        self.clientStreamContinuation = continuation
-
-        Task {
-            for await callback in clientStream {
-                await callback()
-            }
-        }
-    }
-
-    // registers the cert renewal notification callback with libnarrativecert
-    internal func registerCertRenewalNotification() {
-        
-        let acdcActorCert = NarrativeCert(
-            domain: .acdc,
-            identityType: .actor
-        )
-       // TODO: replace with acdcActorCert.refreshedNotificationName once the changes are in laetst OS SDK
-        notify_register_dispatch("com.apple.narrativecertd.acdc.actor.notification.refreshed", &token, DispatchQueue.global(qos: .utility)) { _ in
-            self.logger.debug("Got refreshed notification")
-            self.clientStreamContinuation.yield {
-                do {
-                    let acdcActorCert = NarrativeCert(
-                        domain: .acdc,
-                        identityType: .actor
-                    )
-                   
-                    let tlsCertConfig = try await getCloudMetricsCertConfigFromNarrativeIdentity(narrativeCert: acdcActorCert)
-                    try await self.renewCallback(tlsCertConfig)
-                    
-                    notify_cancel(self.token)
-                    
-                    self.registerCertRenewalNotification()
-                } catch {
-                    self.logger.error("Not able to renew the cert error:\(error, privacy: .public)")
-                }
-            }
-        }
-    }
-
-    deinit {
-        clientStreamContinuation.finish()
-    }
-}
-
 internal func getCertificateName(_ certificate: SecCertificate) -> String {
     var commonName: CFString? = nil
     SecCertificateCopyCommonName(certificate, &commonName)
@@ -141,7 +78,7 @@ internal func getCertificateName(_ certificate: SecCertificate) -> String {
 }
 
 //TODO: Remove this
-public func getFullCertChain(narrativeCert: NarrativeCert)  -> [SecCertificate]? {
+package func getFullCertChain(narrativeCert: NarrativeCert)  -> [SecCertificate]? {
     let narrativeRef = narrativeCert.fetchSecRefsFromKeychain()
     guard let narrativeRef = narrativeRef else {
         return nil
@@ -165,9 +102,8 @@ public func getFullCertChain(narrativeCert: NarrativeCert)  -> [SecCertificate]?
 }
 
 
-// gets the CloudMetricsCertConfig from NarrativeIdentity
-internal
-func getCloudMetricsCertConfigFromNarrativeIdentity(narrativeCert: NarrativeCert) async throws -> CloudMetricsCertConfig {
+/// gets the Configuration.Certificates from NarrativeIdentity
+internal func getCertificatesFromNarrativeIdentity(narrativeCert: NarrativeCert) throws -> GRPCTLSConfiguration {
     let narrativeRef = narrativeCert.fetchSecRefsFromKeychain()
     
     logger.debug("Getting sec references")
@@ -212,16 +148,17 @@ func getCloudMetricsCertConfigFromNarrativeIdentity(narrativeCert: NarrativeCert
     }
     
     let certName  = getCertificateName(hostCertRefs.certRef)
-    logger.debug("""
-                      Narrative host cert details
-                      Identifier=\(hostCert.keychainLabel), \
-                      CommonName=\(certName)
+    logger.log("""
+                Narrative host cert details
+                Identifier=\(hostCert.keychainLabel), \
+                CommonName=\(certName)
                 """)
 
-    return CloudMetricsCertConfig(mtlsPrivateKey: mtlsPrivateKey,
-                                  mtlsCertificateChain: mtlsCertificateChain,
-                                  mtlsTrustRoots: mtlsTrustRoots,
-                                  hostName: certName)
+    return .makeClientConfigurationBackedByNIOSSL(
+        certificateChain: mtlsCertificateChain.map { .certificate($0) },
+        privateKey: .privateKey(mtlsPrivateKey),
+        trustRoots: mtlsTrustRoots
+    )
 }
 
 internal struct NarrativeKey: NIOSSLCustomPrivateKey, Hashable {
@@ -290,22 +227,20 @@ internal enum NarrativeIdentityError: Error {
     case privateKeyMissing(String)
 }
 
-internal func loadTLSCerts() async throws -> CloudMetricsCertConfig {
-        logger.debug("Getting Narrative ACDC cert to establish mTLS")
-    
-        let acdcActorCert = NarrativeCert(domain: .acdc
-                                      , identityType: .actor)
+internal func loadTLSCerts() throws -> GRPCTLSConfiguration {
+        logger.log("Getting Narrative ACDC cert to establish mTLS")
+
+        let acdcActorCert = NarrativeCert(domain: .acdc, identityType: .actor)
         guard let acdcActorCertRefs = acdcActorCert.fetchSecRefsFromKeychain() else {
             throw NarrativeHelperError.unableToGetCertificate("Error getting SecRefs for acdc actor certificate")
         }
 
-
         let certName  = getCertificateName(acdcActorCertRefs.certRef)
-        logger.debug("""
-                          ACDC actor cert details
-                          Identifier=\(acdcActorCert.keychainLabel), \
-                          CommonName=\(certName)
-                    """)
+        logger.log("""
+                   ACDC actor cert details \
+                   Identifier=\(acdcActorCert.keychainLabel), \
+                   CommonName=\(certName)
+                   """)
 
-        return try await getCloudMetricsCertConfigFromNarrativeIdentity(narrativeCert: acdcActorCert)
+        return try getCertificatesFromNarrativeIdentity(narrativeCert: acdcActorCert)
 }

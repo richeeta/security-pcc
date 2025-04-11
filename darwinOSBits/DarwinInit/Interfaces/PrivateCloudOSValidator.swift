@@ -257,7 +257,7 @@ public class CustomerValidator: PrivateCloudOSValidator {
          Note: no keys currently allowed under this ID in customer */
         .allowOnly(applicationIDs: [
             "com.apple.acdc.cloudmetricsd":[],
-            // com.apple.acsi.cloudusagetrackingd no longer allowed as it is stale
+            "com.apple.acsi.cloudusagetrackingd":[],
             // com.apple.acsi.deploy-manifest-os-variant no longer allowed as it is stale
             "com.apple.cloudos":[],
             "com.apple.cloudos.AppleComputeEnsembler":[],
@@ -673,7 +673,7 @@ public class CarryValidator: CustomerValidator {
         // Rule for allow list of keys under "com.apple.thimble.inference.tie-controllerd" app ID
         .allowOnly(applicationIDs: [
             "com.apple.acdc.cloudmetricsd":[],
-            // com.apple.acsi.cloudusagetrackingd no longer allowed as it is stale 
+            "com.apple.acsi.cloudusagetrackingd":[],
             // com.apple.acsi.deploy-manifest-os-variant no longer allowed as it is stale
             "com.apple.cloudos":[],
             "com.apple.cloudos.AppleComputeEnsembler":[],

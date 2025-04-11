@@ -174,11 +174,6 @@ struct RateLimitTimingDetails: Sendable, Equatable, Hashable, Codable {
 struct RateLimitConfiguration: Sendable, Equatable, Hashable, Codable {
     var filter: RateLimitFilter
     var timing: RateLimitTimingDetails
-
-    init(filter: RateLimitFilter, timing: RateLimitTimingDetails) {
-        self.filter = filter
-        self.timing = timing
-    }
 }
 
 extension RateLimitConfiguration {

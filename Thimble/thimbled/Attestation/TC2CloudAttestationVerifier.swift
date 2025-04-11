@@ -24,7 +24,7 @@ import Foundation
 import PrivateCloudCompute
 
 struct TC2CloudAttestationVerifier: TC2AttestationVerifier, Sendable {
-    private let logger = tc2Logger(forCategory: .AttestationVerifier)
+    private let logger = tc2Logger(forCategory: .attestationVerifier)
     let environment: TC2Environment
     let validator: CloudAttestation.NodeValidator
 

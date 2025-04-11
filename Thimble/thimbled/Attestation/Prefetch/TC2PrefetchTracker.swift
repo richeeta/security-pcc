@@ -20,21 +20,17 @@
 //
 
 import PrivateCloudCompute
-import os.lock
+import Synchronization
 
 final class TC2PrefetchTracker: Sendable {
     private struct State {
         var runningSet: Set<TC2RequestParameters>
     }
-    private let stateLock: OSAllocatedUnfairLock<State>
-    private let logger = tc2Logger(forCategory: .PrefetchRequest)
+    private let stateLock: Mutex<State>
+    private let logger = tc2Logger(forCategory: .prefetchRequest)
 
     init() {
-        self.stateLock = OSAllocatedUnfairLock(
-            uncheckedState: .init(
-                runningSet: Set<TC2RequestParameters>(minimumCapacity: 10)
-            )
-        )
+        self.stateLock = Mutex(.init(runningSet: Set<TC2RequestParameters>(minimumCapacity: 10)))
     }
 
     func ensuringOnlyASinglePrefetchIsRunningForParameters<R>(_ parameters: TC2RequestParameters, body: () async throws -> R) async throws -> R {

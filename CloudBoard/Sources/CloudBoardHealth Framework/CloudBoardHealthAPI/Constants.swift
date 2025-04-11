@@ -14,7 +14,7 @@
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
-import CloudBoardCommon
+internal import CloudBoardCommon
 
 internal let kCloudBoardHealthAPIXPCLocalServiceEntitlement =
     "com.apple.private.cloudos.cloudboardhealth"

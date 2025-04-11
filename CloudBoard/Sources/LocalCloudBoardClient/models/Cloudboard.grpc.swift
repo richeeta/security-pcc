@@ -45,6 +45,11 @@ internal protocol Com_Apple_Cloudboard_Api_V1_CloudBoardClientProtocol: GRPCClie
     callOptions: CallOptions?,
     handler: @escaping (Com_Apple_Cloudboard_Api_V1_LoadResponse) -> Void
   ) -> ServerStreamingCall<Com_Apple_Cloudboard_Api_V1_LoadRequest, Com_Apple_Cloudboard_Api_V1_LoadResponse>
+
+  func invokeProxyDialBack(
+    callOptions: CallOptions?,
+    handler: @escaping (Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse) -> Void
+  ) -> BidirectionalStreamingCall<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackRequest, Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse>
 }
 
 extension Com_Apple_Cloudboard_Api_V1_CloudBoardClientProtocol {
@@ -108,6 +113,30 @@ extension Com_Apple_Cloudboard_Api_V1_CloudBoardClientProtocol {
       request: request,
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeWatchLoadLevelInterceptors() ?? [],
+      handler: handler
+    )
+  }
+
+  /// This RPC is available on Trusted Proxy only.
+  /// The real client of this RPC is Trusted Proxy, but the control is inverted to avoid having to run a gRPC service on ROPES.
+  /// Trusted Proxy initiates the proxy call by sending an InvokeWorkloadResponse.invoke_proxy_initiate message, and
+  /// ROPES creates the InvokeProxyDialBack RPC.
+  ///
+  /// Callers should use the `send` method on the returned object to send messages
+  /// to the server. The caller should send an `.end` after the final message has been sent.
+  ///
+  /// - Parameters:
+  ///   - callOptions: Call options.
+  ///   - handler: A closure called when each response is received from the server.
+  /// - Returns: A `ClientStreamingCall` with futures for the metadata and status.
+  internal func invokeProxyDialBack(
+    callOptions: CallOptions? = nil,
+    handler: @escaping (Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse) -> Void
+  ) -> BidirectionalStreamingCall<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackRequest, Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse> {
+    return self.makeBidirectionalStreamingCall(
+      path: Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata.Methods.invokeProxyDialBack.path,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeInvokeProxyDialBackInterceptors() ?? [],
       handler: handler
     )
   }
@@ -188,6 +217,10 @@ internal protocol Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncClientProtocol: GRP
     _ request: Com_Apple_Cloudboard_Api_V1_LoadRequest,
     callOptions: CallOptions?
   ) -> GRPCAsyncServerStreamingCall<Com_Apple_Cloudboard_Api_V1_LoadRequest, Com_Apple_Cloudboard_Api_V1_LoadResponse>
+
+  func makeInvokeProxyDialBackCall(
+    callOptions: CallOptions?
+  ) -> GRPCAsyncBidirectionalStreamingCall<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackRequest, Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse>
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -231,6 +264,16 @@ extension Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncClientProtocol {
       request: request,
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeWatchLoadLevelInterceptors() ?? []
+    )
+  }
+
+  internal func makeInvokeProxyDialBackCall(
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncBidirectionalStreamingCall<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackRequest, Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse> {
+    return self.makeAsyncBidirectionalStreamingCall(
+      path: Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata.Methods.invokeProxyDialBack.path,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeInvokeProxyDialBackInterceptors() ?? []
     )
   }
 }
@@ -284,6 +327,30 @@ extension Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncClientProtocol {
       interceptors: self.interceptors?.makeWatchLoadLevelInterceptors() ?? []
     )
   }
+
+  internal func invokeProxyDialBack<RequestStream>(
+    _ requests: RequestStream,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncResponseStream<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse> where RequestStream: Sequence, RequestStream.Element == Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackRequest {
+    return self.performAsyncBidirectionalStreamingCall(
+      path: Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata.Methods.invokeProxyDialBack.path,
+      requests: requests,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeInvokeProxyDialBackInterceptors() ?? []
+    )
+  }
+
+  internal func invokeProxyDialBack<RequestStream>(
+    _ requests: RequestStream,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncResponseStream<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse> where RequestStream: AsyncSequence & Sendable, RequestStream.Element == Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackRequest {
+    return self.performAsyncBidirectionalStreamingCall(
+      path: Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata.Methods.invokeProxyDialBack.path,
+      requests: requests,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeInvokeProxyDialBackInterceptors() ?? []
+    )
+  }
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -313,6 +380,9 @@ internal protocol Com_Apple_Cloudboard_Api_V1_CloudBoardClientInterceptorFactory
 
   /// - Returns: Interceptors to use when invoking 'watchLoadLevel'.
   func makeWatchLoadLevelInterceptors() -> [ClientInterceptor<Com_Apple_Cloudboard_Api_V1_LoadRequest, Com_Apple_Cloudboard_Api_V1_LoadResponse>]
+
+  /// - Returns: Interceptors to use when invoking 'invokeProxyDialBack'.
+  func makeInvokeProxyDialBackInterceptors() -> [ClientInterceptor<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackRequest, Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse>]
 }
 
 internal enum Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata {
@@ -323,6 +393,7 @@ internal enum Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata {
       Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata.Methods.invokeWorkload,
       Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata.Methods.fetchAttestation,
       Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata.Methods.watchLoadLevel,
+      Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata.Methods.invokeProxyDialBack,
     ]
   )
 
@@ -343,6 +414,12 @@ internal enum Com_Apple_Cloudboard_Api_V1_CloudBoardClientMetadata {
       name: "WatchLoadLevel",
       path: "/com.apple.cloudboard.api.v1.CloudBoard/WatchLoadLevel",
       type: GRPCCallType.serverStreaming
+    )
+
+    internal static let invokeProxyDialBack = GRPCMethodDescriptor(
+      name: "InvokeProxyDialBack",
+      path: "/com.apple.cloudboard.api.v1.CloudBoard/InvokeProxyDialBack",
+      type: GRPCCallType.bidirectionalStreaming
     )
   }
 }

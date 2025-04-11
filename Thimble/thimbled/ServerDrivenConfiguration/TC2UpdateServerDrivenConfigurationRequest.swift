@@ -28,7 +28,9 @@ import PrivateCloudCompute
 import Security
 import os.lock
 
-final class TC2UpdateServerDrivenConfigurationRequest: Sendable {
+final class TC2UpdateServerDrivenConfigurationRequest<
+    SystemInfo: SystemInfoProtocol
+>: Sendable {
 
     enum Error: Swift.Error {
         case urlSessionError
@@ -36,10 +38,12 @@ final class TC2UpdateServerDrivenConfigurationRequest: Sendable {
         case responseBase64DecodeError
     }
 
-    private let logger = tc2Logger(forCategory: .UpdateServerDrivenConfiguration)
+    private let logger = tc2Logger(forCategory: .updateServerDrivenConfiguration)
+    private let logPrefix: String
     private let requestID: UUID
     private let config: TC2Configuration
     private let decoder = tc2JSONDecoder()
+    private let systemInfo: SystemInfo
     private let serverDrivenConfiguration: TC2ServerDrivenConfiguration
 
     struct BagContainerModel: Codable, Sendable {
@@ -56,51 +60,57 @@ final class TC2UpdateServerDrivenConfigurationRequest: Sendable {
 
     init(
         serverDrivenConfiguration: TC2ServerDrivenConfiguration,
+        systemInfo: SystemInfo,
         requestID: UUID,
         config: TC2Configuration
     ) {
+        self.logPrefix = "\(requestID):"
         self.serverDrivenConfiguration = serverDrivenConfiguration
+        self.systemInfo = systemInfo
         self.requestID = requestID
         self.config = config
     }
 
     func sendRequest() async throws {
-        self.logger.info("\(self.requestID) executing configbag request")
+        self.logger.log("\(self.logPrefix) executing configbag request")
         defer {
-            self.logger.info("\(self.requestID) finished configbag request")
+            self.logger.log("\(self.logPrefix) finished configbag request")
         }
 
         // Set up the request
-        var urlRequest = URLRequest(url: config.environment.configUrl)
+        var urlRequest = URLRequest(url: config.environment(systemInfo: self.systemInfo).configUrl)
         urlRequest.addValue(self.requestID.uuidString, forHTTPHeaderField: HTTPField.Name.appleRequestUUID.rawName)
-        urlRequest.addValue(tc2OSInfo, forHTTPHeaderField: HTTPField.Name.appleClientInfo.rawName)
+        urlRequest.addValue(self.systemInfo.osInfo, forHTTPHeaderField: HTTPField.Name.appleClientInfo.rawName)
         urlRequest.addValue(HTTPField.Constants.userAgentTrustedCloudComputeD, forHTTPHeaderField: HTTPField.Name.contentType.rawName)
+        if let automatedDeviceGroup = systemInfo.automatedDeviceGroup {
+            urlRequest.addValue(automatedDeviceGroup, forHTTPHeaderField: HTTPField.Name.appleAutomatedDeviceGroup.rawName)
+        }
         urlRequest.addValue("application/json", forHTTPHeaderField: HTTPField.Name.accept.rawName)
-        self.logger.debug("\(self.requestID) request ready, request=\(urlRequest)")
+        self.logger.debug("\(self.logPrefix) request ready, request=\(urlRequest)")
 
         // Set up the session
         let urlSessionConfig = URLSessionConfiguration.ephemeral
         urlSessionConfig._usesNWLoader = true
         let urlSession = URLSession(configuration: urlSessionConfig)
-        self.logger.debug("\(self.requestID) session ready, session=\(urlSession)")
+        self.logger.debug("\(self.logPrefix) session ready, session=\(urlSession)")
 
         let data: Data
         let response: URLResponse
         do {
-            self.logger.debug("\(self.requestID) running session async")
+            self.logger.debug("\(self.logPrefix) running session async")
             (data, response) = try await urlSession.data(for: urlRequest)
-            self.logger.debug("\(self.requestID) response returning, response=\(response) data=\(String(describing: data))")
+            self.logger.debug("\(self.logPrefix) response returning, response=\(response) data=\(String(describing: data))")
         } catch {
-            self.logger.error("\(self.requestID) response throwing, error=\(error)")
+            self.logger.error("\(self.logPrefix) response throwing, error=\(error)")
             throw Error.urlSessionError
         }
 
         let model: BagContainerModel
         do {
             model = try self.decoder.decode(BagContainerModel.self, from: data)
-            self.logger.debug("\(self.requestID) model decoded, model=\(String(describing: model))")
+            self.logger.debug("\(self.logPrefix) model decoded, model=\(String(describing: model))")
         } catch {
-            logger.error("\(self.requestID) unable to decode json response data, error=\(error)")
+            logger.error("\(self.logPrefix) unable to decode json response data, error=\(error)")
             throw Error.responseDataDecodeError
         }
 
@@ -110,10 +120,10 @@ final class TC2UpdateServerDrivenConfigurationRequest: Sendable {
         // we just take the bag bytes, which are base64 encoded utf8 json.
 
         guard let utf8jsonBag = Data(base64Encoded: model.bag) else {
-            logger.error("\(self.requestID) unable to decode base64 bag")
+            logger.error("\(self.logPrefix) unable to decode base64 bag")
             throw Error.responseBase64DecodeError
         }
-        self.logger.debug("\(self.requestID) base64 bag decoded, pushing update of utf8jsonBag=\(utf8jsonBag)")
+        self.logger.debug("\(self.logPrefix) base64 bag decoded, pushing update of utf8jsonBag=\(utf8jsonBag)")
 
         await self.serverDrivenConfiguration.updateJsonModel(utf8jsonBag)
 
@@ -125,13 +135,19 @@ final class TC2UpdateServerDrivenConfigurationRequest: Sendable {
         // be pervasive because of the way we use value types and pass the
         // single config around. I prefer not to undertake that at this point,
         // instead simply writing to prefs when I need them.
-        TC2DefaultConfiguration.writeBackProposedLiveOnEnvironment(self.serverDrivenConfiguration)
+        TC2DefaultConfiguration.writeBackProposedLiveOnEnvironment(
+            serverDrivenConfiguration: self.serverDrivenConfiguration,
+            systemInfo: systemInfo
+        )
     }
 }
 
 extension TC2DefaultConfiguration {
-    static func writeBackProposedLiveOnEnvironment(_ serverDrivenConfiguration: TC2ServerDrivenConfiguration) {
-        let logger = tc2Logger(forCategory: .UpdateServerDrivenConfiguration)
+    static func writeBackProposedLiveOnEnvironment(
+        serverDrivenConfiguration: TC2ServerDrivenConfiguration,
+        systemInfo: SystemInfoProtocol
+    ) {
+        let logger = tc2Logger(forCategory: .updateServerDrivenConfiguration)
 
         // We only ever write this proposal for internal builds.
         guard os_variant_has_internal_content(privateCloudComputeOsVariantSubsystem) else {
@@ -143,7 +159,7 @@ extension TC2DefaultConfiguration {
         if let spillOver = serverDrivenConfiguration.jsonModel.liveOnProdSpillover, (0.0...1.0).contains(spillOver) {
             // We were given a valid spillover. Write it!
             assert(spillOver >= 0.0 && spillOver <= 1.0)
-            let p = SystemInfo().uniqueDeviceIDPercentile
+            let p = systemInfo.uniqueDeviceIDPercentile
 
             let proposal: String
             if p < spillOver {

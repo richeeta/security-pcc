@@ -24,7 +24,7 @@ extension CFPreferences {
     }
 }
 
-struct CBJobHelperConfiguration: Codable, Hashable {
+public struct CBJobHelperConfiguration: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case cloudAppName = "CloudAppName"
         case _enforceTGTValidation = "EnforceTGTValidation"
@@ -42,7 +42,8 @@ struct CBJobHelperConfiguration: Codable, Hashable {
         set { self._enforceTGTValidation = newValue }
     }
 
-    static func fromPreferences(secureConfigLoader: SecureConfigLoader = .real) throws -> CBJobHelperConfiguration {
+    public static func fromPreferences(secureConfigLoader: SecureConfigLoader = .real) throws
+    -> CBJobHelperConfiguration {
         CloudBoardJobHelper.logger
             .info(
                 "Loading configuration from preferences \(CFPreferences.cbJobHelperPreferencesDomain, privacy: .public)"

@@ -21,10 +21,15 @@ internal enum CloudBoardJobHelperAPIXPCClientToServerMessages {
         internal typealias Success = ExplicitSuccess
         internal typealias Failure = CloudBoardJobHelperAPIError
 
-        internal var request: InvokeWorkloadRequest
+        internal var message: CloudBoardDaemonToJobHelperMessage
     }
 
     internal struct Teardown: CloudBoardAsyncXPCMessage {
+        internal typealias Success = ExplicitSuccess
+        internal typealias Failure = CloudBoardJobHelperAPIError
+    }
+
+    internal struct Abandon: CloudBoardAsyncXPCMessage {
         internal typealias Success = ExplicitSuccess
         internal typealias Failure = CloudBoardJobHelperAPIError
     }

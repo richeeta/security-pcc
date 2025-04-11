@@ -14,6 +14,7 @@
 				1339FDE52C7548DA0025CA8C /* CopyFiles */,
 			);
 			dependencies = (
+				133B29B12C90BAC600EADAC7 /* PBXTargetDependency */,
 				13C5BC992C6D02070043288D /* PBXTargetDependency */,
 				13C5BC9B2C6D02070043288D /* PBXTargetDependency */,
 			);
@@ -28,6 +29,11 @@
 		130906A22C6D090A00ECB52D /* com.apple.security-research.pccvre.plist in Copy Logging Profile */ = {isa = PBXBuildFile; fileRef = 13DB47342C6BEC06008A2C87 /* com.apple.security-research.pccvre.plist */; };
 		130906A32C6D092200ECB52D /* com.apple.security-research.vrevm.plist in Copy Logging Profile */ = {isa = PBXBuildFile; fileRef = 13DB47D72C6BEC40008A2C87 /* com.apple.security-research.vrevm.plist */; };
 		1339FDE62C7548E50025CA8C /* License.rtf in CopyFiles */ = {isa = PBXBuildFile; fileRef = 13DB480C2C6BEC4D008A2C87 /* License.rtf */; };
+		133B29A72C90B9E700EADAC7 /* NIOHTTP1 in Frameworks */ = {isa = PBXBuildFile; productRef = 133B29A62C90B9E700EADAC7 /* NIOHTTP1 */; };
+		133B29A92C90B9EC00EADAC7 /* SystemPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 133B29A82C90B9EC00EADAC7 /* SystemPackage */; };
+		133B29AB2C90B9F700EADAC7 /* Collections in Frameworks */ = {isa = PBXBuildFile; productRef = 133B29AA2C90B9F700EADAC7 /* Collections */; };
+		133B29AD2C90BA0000EADAC7 /* Atomics in Frameworks */ = {isa = PBXBuildFile; productRef = 133B29AC2C90BA0000EADAC7 /* Atomics */; };
+		133B29AF2C90BA0300EADAC7 /* NIO in Frameworks */ = {isa = PBXBuildFile; productRef = 133B29AE2C90BA0300EADAC7 /* NIO */; };
 		135320DB2C6D1F4D0079186D /* Main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135320DA2C6D1F4D0079186D /* Main.swift */; };
 		139020212C6BF859005F6059 /* Atomics in Frameworks */ = {isa = PBXBuildFile; productRef = 139020202C6BF859005F6059 /* Atomics */; };
 		139020232C6BF874005F6059 /* SystemPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 139020222C6BF874005F6059 /* SystemPackage */; };
@@ -46,6 +52,89 @@
 		13C5BC902C6D01520043288D /* ArgumentParserInternal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 13C5BC8F2C6D01520043288D /* ArgumentParserInternal.framework */; };
 		13C5BC922C6D01590043288D /* Virtualization.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 13C5BC912C6D01590043288D /* Virtualization.framework */; };
 		13C5BC932C6D01AA0043288D /* License.rtf in Sources */ = {isa = PBXBuildFile; fileRef = 13DB480C2C6BEC4D008A2C87 /* License.rtf */; };
+		13CF39FA2C90B3E2003B7C83 /* TransparencyLog+Leaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F613D2C73C64300E8A79F /* TransparencyLog+Leaf.swift */; };
+		13CF39FB2C90B3E2003B7C83 /* License.rtf in Sources */ = {isa = PBXBuildFile; fileRef = 13DB480C2C6BEC4D008A2C87 /* License.rtf */; };
+		13CF39FD2C90B3E2003B7C83 /* Auditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F61382C73C63900E8A79F /* Auditor.swift */; };
+		13CF39FE2C90B3E2003B7C83 /* Auditor+Delegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F61392C73C63900E8A79F /* Auditor+Delegate.swift */; };
+		13CF39FF2C90B3E2003B7C83 /* CryptexListCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47112C6BEC06008A2C87 /* CryptexListCmd.swift */; };
+		13CF3A002C90B3E2003B7C83 /* InstanceListCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47202C6BEC06008A2C87 /* InstanceListCmd.swift */; };
+		13CF3A012C90B3E2003B7C83 /* URL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47322C6BEC06008A2C87 /* URL.swift */; };
+		13CF3A022C90B3E2003B7C83 /* Transparency.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47572C6BEC06008A2C87 /* Transparency.pb.swift */; };
+		13CF3A032C90B3E2003B7C83 /* SWReleases+Release.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47492C6BEC06008A2C87 /* SWReleases+Release.swift */; };
+		13CF3A042C90B3E2003B7C83 /* TransparencyLog+PublicKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47642C6BEC06008A2C87 /* TransparencyLog+PublicKeys.swift */; };
+		13CF3A052C90B3E2003B7C83 /* TransparencyLog+SignedObject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47652C6BEC06008A2C87 /* TransparencyLog+SignedObject.swift */; };
+		13CF3A062C90B3E2003B7C83 /* FileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47302C6BEC06008A2C87 /* FileManager.swift */; };
+		13CF3A072C90B3E2003B7C83 /* InstanceCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB471C2C6BEC06008A2C87 /* InstanceCmd.swift */; };
+		13CF3A082C90B3E2003B7C83 /* TransparencyLog+PATLeaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F613F2C73C64A00E8A79F /* TransparencyLog+PATLeaf.swift */; };
+		13CF3A092C90B3E2003B7C83 /* TransparencyLog+TLTLeaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F61402C73C64A00E8A79F /* TransparencyLog+TLTLeaf.swift */; };
+		13CF3A0A2C90B3E2003B7C83 /* CLI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB472C2C6BEC06008A2C87 /* CLI.swift */; };
+		13CF3A0B2C90B3E2003B7C83 /* VRE+Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB476A2C6BEC06008A2C87 /* VRE+Config.swift */; };
+		13CF3A0C2C90B3E2003B7C83 /* SWReleases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47482C6BEC06008A2C87 /* SWReleases.swift */; };
+		13CF3A0D2C90B3E2003B7C83 /* ReleaseListCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47282C6BEC06008A2C87 /* ReleaseListCmd.swift */; };
+		13CF3A0E2C90B3E2003B7C83 /* CryptexSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB476B2C6BEC06008A2C87 /* CryptexSpec.swift */; };
+		13CF3A0F2C90B3E2003B7C83 /* LicenseCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47242C6BEC06008A2C87 /* LicenseCmd.swift */; };
+		13CF3A102C90B3E2003B7C83 /* ReleaseMetadata.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47462C6BEC06008A2C87 /* ReleaseMetadata.pb.swift */; };
+		13CF3A112C90B3E2003B7C83 /* TransparencyLogCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F61332C73C5BB00E8A79F /* TransparencyLogCmd.swift */; };
+		13CF3A122C90B3E2003B7C83 /* TransparencyLogAuditCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F61342C73C5BB00E8A79F /* TransparencyLogAuditCmd.swift */; };
+		13CF3A132C90B3E2003B7C83 /* TransparencyLog+Head.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47612C6BEC06008A2C87 /* TransparencyLog+Head.swift */; };
+		13CF3A142C90B3E2003B7C83 /* HTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB473C2C6BEC06008A2C87 /* HTTPServer.swift */; };
+		13CF3A152C90B3E2003B7C83 /* TransparencyLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB475F2C6BEC06008A2C87 /* TransparencyLog.swift */; };
+		13CF3A162C90B3E2003B7C83 /* InstanceConfigureCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB471A2C6BEC06008A2C87 /* InstanceConfigureCmd.swift */; };
+		13CF3A172C90B3E2003B7C83 /* TransparencyLog+Trees.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47662C6BEC06008A2C87 /* TransparencyLog+Trees.swift */; };
+		13CF3A182C90B3E2003B7C83 /* Utils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47422C6BEC06008A2C87 /* Utils.swift */; };
+		13CF3A192C90B3E2003B7C83 /* VRE.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47692C6BEC06008A2C87 /* VRE.swift */; };
+		13CF3A1A2C90B3E2003B7C83 /* ATServiceApi.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB474F2C6BEC06008A2C87 /* ATServiceApi.pb.swift */; };
+		13CF3A1B2C90B3E2003B7C83 /* PCCVREUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB48102C6BEC4D008A2C87 /* PCCVREUtils.swift */; };
+		13CF3A1C2C90B3E2003B7C83 /* Main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135320DA2C6D1F4D0079186D /* Main.swift */; };
+		13CF3A1D2C90B3E2003B7C83 /* ArgumentVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB48132C6BEC4D008A2C87 /* ArgumentVisibility.swift */; };
+		13CF3A1E2C90B3E2003B7C83 /* MerkleTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F61202C73C52500E8A79F /* MerkleTree.swift */; };
+		13CF3A202C90B3E2003B7C83 /* PCCVRELicenseAgreementManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB480F2C6BEC4D008A2C87 /* PCCVRELicenseAgreementManager.swift */; };
+		13CF3A212C90B3E2003B7C83 /* PCCVRELicenseAgreementConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB480E2C6BEC4D008A2C87 /* PCCVRELicenseAgreementConstants.swift */; };
+		13CF3A222C90B3E2003B7C83 /* Image4PackageCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB470D2C6BEC06008A2C87 /* Image4PackageCmd.swift */; };
+		13CF3A232C90B3E2003B7C83 /* ReleaseDownloadCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47272C6BEC06008A2C87 /* ReleaseDownloadCmd.swift */; };
+		13CF3A242C90B3E2003B7C83 /* ReleaseCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47262C6BEC06008A2C87 /* ReleaseCmd.swift */; };
+		13CF3A252C90B3E2003B7C83 /* DarwinInitSetCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47162C6BEC06008A2C87 /* DarwinInitSetCmd.swift */; };
+		13CF3A262C90B3E2003B7C83 /* VMEnetBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB473E2C6BEC06008A2C87 /* VMEnetBridge.swift */; };
+		13CF3A272C90B3E2003B7C83 /* InstanceStartCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47222C6BEC06008A2C87 /* InstanceStartCmd.swift */; };
+		13CF3A282C90B3E2003B7C83 /* DarwinInitHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47362C6BEC06008A2C87 /* DarwinInitHelper.swift */; };
+		13CF3A292C90B3E2003B7C83 /* DarwinInitHelper+SSH.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47382C6BEC06008A2C87 /* DarwinInitHelper+SSH.swift */; };
+		13CF3A2A2C90B3E2003B7C83 /* DarwinInitDumpCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47152C6BEC06008A2C87 /* DarwinInitDumpCmd.swift */; };
+		13CF3A2B2C90B3E2003B7C83 /* InstanceCreateCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB471D2C6BEC06008A2C87 /* InstanceCreateCmd.swift */; };
+		13CF3A2C2C90B3E2003B7C83 /* AssetHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47402C6BEC06008A2C87 /* AssetHelper.swift */; };
+		13CF3A2D2C90B3E2003B7C83 /* InstanceDiagnosticCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB471E2C6BEC06008A2C87 /* InstanceDiagnosticCmd.swift */; };
+		13CF3A2E2C90B3E2003B7C83 /* CryptexRemoveCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47122C6BEC06008A2C87 /* CryptexRemoveCmd.swift */; };
+		13CF3A2F2C90B3E2003B7C83 /* InstanceRemoveCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47212C6BEC06008A2C87 /* InstanceRemoveCmd.swift */; };
+		13CF3A302C90B3E2003B7C83 /* MachO+PayloadProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F3BECD2C6D03F300992955 /* MachO+PayloadProperties.swift */; };
+		13CF3A312C90B3E2003B7C83 /* MachO+Segment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F3BECE2C6D03F300992955 /* MachO+Segment.swift */; };
+		13CF3A322C90B3E2003B7C83 /* MachO+UnixThread.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F3BECF2C6D03F300992955 /* MachO+UnixThread.swift */; };
+		13CF3A332C90B3E2003B7C83 /* MachO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F3BECC2C6D03F300992955 /* MachO.swift */; };
+		13CF3A342C90B3E2003B7C83 /* String.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47312C6BEC06008A2C87 /* String.swift */; };
+		13CF3A352C90B3E2003B7C83 /* CryptexAddCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47102C6BEC06008A2C87 /* CryptexAddCmd.swift */; };
+		13CF3A362C90B3E2003B7C83 /* Data.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB472F2C6BEC06008A2C87 /* Data.swift */; };
+		13CF3A372C90B3E2003B7C83 /* InstanceInferenceRequestCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB471F2C6BEC06008A2C87 /* InstanceInferenceRequestCmd.swift */; };
+		13CF3A382C90B3E2003B7C83 /* TransparencyLog+Leaves.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47632C6BEC06008A2C87 /* TransparencyLog+Leaves.swift */; };
+		13CF3A392C90B3E2003B7C83 /* SWReleases+Release+Metadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB474A2C6BEC06008A2C87 /* SWReleases+Release+Metadata.swift */; };
+		13CF3A3A2C90B3E2003B7C83 /* TransparencyLog+ATLeaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47602C6BEC06008A2C87 /* TransparencyLog+ATLeaf.swift */; };
+		13CF3A3B2C90B3E2003B7C83 /* CryptexHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47412C6BEC06008A2C87 /* CryptexHelper.swift */; };
+		13CF3A3C2C90B3E2003B7C83 /* Image4ExtractCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB470C2C6BEC06008A2C87 /* Image4ExtractCmd.swift */; };
+		13CF3A3D2C90B3E2003B7C83 /* TransparencyLog+KTInitBag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47622C6BEC06008A2C87 /* TransparencyLog+KTInitBag.swift */; };
+		13CF3A3E2C90B3E2003B7C83 /* VRE+VM.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB476C2C6BEC06008A2C87 /* VRE+VM.swift */; };
+		13CF3A3F2C90B3E2003B7C83 /* KtClientApi.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47542C6BEC06008A2C87 /* KtClientApi.pb.swift */; };
+		13CF3A402C90B3E2003B7C83 /* DarwinInitCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47142C6BEC06008A2C87 /* DarwinInitCmd.swift */; };
+		13CF3A412C90B3E2003B7C83 /* TransparencyByteBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB475D2C6BEC06008A2C87 /* TransparencyByteBuffer.swift */; };
+		13CF3A422C90B3E2003B7C83 /* CryptexCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB470F2C6BEC06008A2C87 /* CryptexCmd.swift */; };
+		13CF3A432C90B3E2003B7C83 /* DarwinInitHelper+Cryptex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47372C6BEC06008A2C87 /* DarwinInitHelper+Cryptex.swift */; };
+		13CF3A442C90B3E2003B7C83 /* AuditorApi.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47512C6BEC06008A2C87 /* AuditorApi.pb.swift */; };
+		13CF3A452C90B3E2003B7C83 /* Image4Cmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB470B2C6BEC06008A2C87 /* Image4Cmd.swift */; };
+		13CF3A462C90B3E2003B7C83 /* CryptexCreateCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47092C6BEC06008A2C87 /* CryptexCreateCmd.swift */; };
+		13CF3A472C90B3E2003B7C83 /* HTTPHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB473B2C6BEC06008A2C87 /* HTTPHandler.swift */; };
+		13CF3A482C90B3E2003B7C83 /* AT.tls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB475B2C6BEC06008A2C87 /* AT.tls.swift */; };
+		13CF3A492C90B3E2003B7C83 /* SshCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47182C6BEC06008A2C87 /* SshCmd.swift */; };
+		13CF3A4A2C90B3E2003B7C83 /* ATResearcherApi.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB474D2C6BEC06008A2C87 /* ATResearcherApi.pb.swift */; };
+		13CF3A4C2C90B3E2003B7C83 /* libauthinstall.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 13C5BC852C6CFEBF0043288D /* libauthinstall.a */; };
+		13CF3A4D2C90B3E2003B7C83 /* libbootpolicy.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 13C5BC832C6CFE490043288D /* libbootpolicy.tbd */; };
+		13CF3A4E2C90B3E2003B7C83 /* libImg4Encode.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 13C5BC7F2C6CFE410043288D /* libImg4Encode.a */; };
+		13CF3A4F2C90B3E2003B7C83 /* libImg4Decode.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 13C5BC802C6CFE410043288D /* libImg4Decode.a */; };
 		13DB47752C6BEC06008A2C87 /* CryptexListCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47112C6BEC06008A2C87 /* CryptexListCmd.swift */; };
 		13DB47762C6BEC06008A2C87 /* InstanceListCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47202C6BEC06008A2C87 /* InstanceListCmd.swift */; };
 		13DB47772C6BEC06008A2C87 /* URL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47322C6BEC06008A2C87 /* URL.swift */; };
@@ -91,7 +180,7 @@
 		13DB47A42C6BEC06008A2C87 /* TransparencyLog+Leaves.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47632C6BEC06008A2C87 /* TransparencyLog+Leaves.swift */; };
 		13DB47A52C6BEC06008A2C87 /* SWReleases+Release+Metadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB474A2C6BEC06008A2C87 /* SWReleases+Release+Metadata.swift */; };
 		13DB47A62C6BEC06008A2C87 /* TransparencyLog+ATLeaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47602C6BEC06008A2C87 /* TransparencyLog+ATLeaf.swift */; };
-		13DB47A82C6BEC06008A2C87 /* DMGHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47412C6BEC06008A2C87 /* DMGHelper.swift */; };
+		13DB47A82C6BEC06008A2C87 /* CryptexHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47412C6BEC06008A2C87 /* CryptexHelper.swift */; };
 		13DB47AB2C6BEC06008A2C87 /* Image4ExtractCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB470C2C6BEC06008A2C87 /* Image4ExtractCmd.swift */; };
 		13DB47AC2C6BEC06008A2C87 /* TransparencyLog+KTInitBag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB47622C6BEC06008A2C87 /* TransparencyLog+KTInitBag.swift */; };
 		13DB47AD2C6BEC06008A2C87 /* VRE+VM.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB476C2C6BEC06008A2C87 /* VRE+VM.swift */; };
@@ -160,13 +249,41 @@
 		472F61412C73C64A00E8A79F /* TransparencyLog+PATLeaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F613F2C73C64A00E8A79F /* TransparencyLog+PATLeaf.swift */; };
 		472F61422C73C64A00E8A79F /* TransparencyLog+TLTLeaf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472F61402C73C64A00E8A79F /* TransparencyLog+TLTLeaf.swift */; };
 		476E901C2C922BE100E19E47 /* TransparencyLogVerifyInclusionCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 476E901B2C922BDA00E19E47 /* TransparencyLogVerifyInclusionCmd.swift */; };
-		B9BB75742C9506E000539D2C /* FileHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BB75732C9506DA00539D2C /* FileHandle.swift */; };
+		70D6DACF2C94EB55001DD40F /* TransparencyLogVerifyInclusionCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 476E901B2C922BDA00E19E47 /* TransparencyLogVerifyInclusionCmd.swift */; };
+		B90901E12CA357B800BFC48A /* Digest.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90901E02CA357B200BFC48A /* Digest.swift */; };
+		B90901E22CA357B800BFC48A /* Digest.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90901E02CA357B200BFC48A /* Digest.swift */; };
+		B941B42F2CAB117E007CE078 /* IdentityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941B42E2CAB1178007CE078 /* IdentityProvider.swift */; };
+		B941B4302CAB117E007CE078 /* IdentityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941B42E2CAB1178007CE078 /* IdentityProvider.swift */; };
+		B941B4382CAB1330007CE078 /* SecIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941B4372CAB1328007CE078 /* SecIdentity.swift */; };
+		B941B4392CAB1330007CE078 /* SecIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941B4372CAB1328007CE078 /* SecIdentity.swift */; };
+		B941B43C2CAB13F8007CE078 /* SecTrust.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941B43B2CAB13F3007CE078 /* SecTrust.swift */; };
+		B941B43D2CAB13F8007CE078 /* SecTrust.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941B43B2CAB13F3007CE078 /* SecTrust.swift */; };
+		B941B43F2CAB1453007CE078 /* SecCertificate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941B43E2CAB144A007CE078 /* SecCertificate.swift */; };
+		B941B4402CAB1453007CE078 /* SecCertificate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941B43E2CAB144A007CE078 /* SecCertificate.swift */; };
+		B941B4412CAB5113007CE078 /* CloudAttestation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DB9D782C8932C40029A1D7 /* CloudAttestation.swift */; };
+		B95F6C502CA23B8300C63B32 /* BuildManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95F6C4F2CA23B7C00C63B32 /* BuildManifest.swift */; };
+		B95F6C512CA23B8300C63B32 /* BuildManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95F6C4F2CA23B7C00C63B32 /* BuildManifest.swift */; };
+		B9BB75582C94BFD300539D2C /* AttestationCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DB9D712C8930A30029A1D7 /* AttestationCmd.swift */; };
+		B9BB75592C94BFF400539D2C /* AttestationParseCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DB9D742C89317A0029A1D7 /* AttestationParseCmd.swift */; };
+		B9BB755A2C94C00000539D2C /* AttestationVerifyCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DB9D762C8931DA0029A1D7 /* AttestationVerifyCmd.swift */; };
+		B9BB755B2C94C07100539D2C /* Image4Manifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9E09DCC2C936FD100FC3EEF /* Image4Manifest.swift */; };
+		B9BB75762C95075300539D2C /* FileHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BB75752C95075000539D2C /* FileHandle.swift */; };
+		B9BB75772C95075300539D2C /* FileHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BB75752C95075000539D2C /* FileHandle.swift */; };
+		B9BB757B2C9918BC00539D2C /* ReleaseVerifyCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BB757A2C9918BC00539D2C /* ReleaseVerifyCmd.swift */; };
+		B9BB757C2C9918BC00539D2C /* ReleaseVerifyCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BB757A2C9918BC00539D2C /* ReleaseVerifyCmd.swift */; };
+		B9C2D6E92CB8A0F700CC4285 /* Sequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9C2D6E82CB8A0F300CC4285 /* Sequence.swift */; };
+		B9C2D6EA2CB8A0F700CC4285 /* Sequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9C2D6E82CB8A0F300CC4285 /* Sequence.swift */; };
+		B9CC39EB2CAF138B009B07A0 /* AMRestorableDeviceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9CC39E72CAEFF63009B07A0 /* AMRestorableDeviceState.swift */; };
 		B9DB9D722C8930A30029A1D7 /* AttestationCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DB9D712C8930A30029A1D7 /* AttestationCmd.swift */; };
 		B9DB9D752C8931810029A1D7 /* AttestationParseCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DB9D742C89317A0029A1D7 /* AttestationParseCmd.swift */; };
 		B9DB9D772C8931DF0029A1D7 /* AttestationVerifyCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DB9D762C8931DA0029A1D7 /* AttestationVerifyCmd.swift */; };
 		B9DB9D792C8932C80029A1D7 /* CloudAttestation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DB9D782C8932C40029A1D7 /* CloudAttestation.swift */; };
 		B9E09DCD2C936FD800FC3EEF /* Image4Manifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9E09DCC2C936FD100FC3EEF /* Image4Manifest.swift */; };
 		B9ECC04B2C741490000F969D /* Utils.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9ECC04A2C74148D000F969D /* Utils.swift */; };
+		C02CDA602CCC4E8800B8074E /* ReleaseDumpCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02CDA5F2CCC4E8800B8074E /* ReleaseDumpCmd.swift */; };
+		C02CDA612CCC59FF00B8074E /* ReleaseDumpCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02CDA5F2CCC4E8800B8074E /* ReleaseDumpCmd.swift */; };
+		C02CDA632CCC656000B8074E /* AttestationCanonicalizeCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02CDA622CCC656000B8074E /* AttestationCanonicalizeCmd.swift */; };
+		C02CDA642CCC6D0B00B8074E /* AttestationCanonicalizeCmd.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02CDA622CCC656000B8074E /* AttestationCanonicalizeCmd.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXBuildRule section */
@@ -200,9 +317,31 @@
 			runOncePerArchitecture = 0;
 			script = "$PROJECT_DIR/xcsh/generate_license_hash.sh \"$SCRIPT_INPUT_FILE\" \"$DERIVED_FILE_DIR\"/PCRLicenseAgreementConstants_Generated.swift\n";
 		};
+		13CF3A572C90B3E2003B7C83 /* PBXBuildRule */ = {
+			isa = PBXBuildRule;
+			compilerSpec = com.apple.compilers.proxy.script;
+			filePatterns = "*License.rtf";
+			fileType = pattern.proxy;
+			inputFiles = (
+				"$(PROJECT_DIR)/Shared/PCC/License.rtf",
+			);
+			isEditable = 1;
+			outputFiles = (
+				"$(DERIVED_FILE_DIR)/PCRLicenseAgreementConstants_Generated.swift",
+			);
+			runOncePerArchitecture = 0;
+			script = "$PROJECT_DIR/xcsh/generate_license_hash.sh \"$SCRIPT_INPUT_FILE\" \"$DERIVED_FILE_DIR\"/PCRLicenseAgreementConstants_Generated.swift\n";
+		};
 /* End PBXBuildRule section */
 
 /* Begin PBXContainerItemProxy section */
+		133B29B02C90BAC600EADAC7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 135A99722C6BEB43006F3F3E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 13CF39F82C90B3E2003B7C83;
+			remoteInfo = pccutil;
+		};
 		13C5BC982C6D02070043288D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 135A99722C6BEB43006F3F3E /* Project object */;
@@ -274,6 +413,8 @@
 		13C5BC8D2C6D014D0043288D /* RemoteServiceDiscovery.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RemoteServiceDiscovery.framework; path = System/Library/PrivateFrameworks/RemoteServiceDiscovery.framework; sourceTree = SDKROOT; };
 		13C5BC8F2C6D01520043288D /* ArgumentParserInternal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ArgumentParserInternal.framework; path = System/Library/PrivateFrameworks/ArgumentParserInternal.framework; sourceTree = SDKROOT; };
 		13C5BC912C6D01590043288D /* Virtualization.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Virtualization.framework; path = System/Library/Frameworks/Virtualization.framework; sourceTree = SDKROOT; };
+		13CF3A5B2C90B3E2003B7C83 /* pccutil */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = pccutil; sourceTree = BUILT_PRODUCTS_DIR; };
+		13CF3A5C2C90B415003B7C83 /* pccutil.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = pccutil.xcconfig; sourceTree = "<group>"; };
 		13DB47092C6BEC06008A2C87 /* CryptexCreateCmd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptexCreateCmd.swift; sourceTree = "<group>"; };
 		13DB470B2C6BEC06008A2C87 /* Image4Cmd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Image4Cmd.swift; sourceTree = "<group>"; };
 		13DB470C2C6BEC06008A2C87 /* Image4ExtractCmd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Image4ExtractCmd.swift; sourceTree = "<group>"; };
@@ -311,7 +452,7 @@
 		13DB473C2C6BEC06008A2C87 /* HTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServer.swift; sourceTree = "<group>"; };
 		13DB473E2C6BEC06008A2C87 /* VMEnetBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMEnetBridge.swift; sourceTree = "<group>"; };
 		13DB47402C6BEC06008A2C87 /* AssetHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetHelper.swift; sourceTree = "<group>"; };
-		13DB47412C6BEC06008A2C87 /* DMGHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DMGHelper.swift; sourceTree = "<group>"; };
+		13DB47412C6BEC06008A2C87 /* CryptexHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptexHelper.swift; sourceTree = "<group>"; };
 		13DB47422C6BEC06008A2C87 /* Utils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utils.swift; sourceTree = "<group>"; };
 		13DB47442C6BEC06008A2C87 /* buildproto.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = buildproto.sh; sourceTree = "<group>"; };
 		13DB47452C6BEC06008A2C87 /* ReleaseMetadata.proto */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.protobuf; path = ReleaseMetadata.proto; sourceTree = "<group>"; };
@@ -407,13 +548,24 @@
 		472F613F2C73C64A00E8A79F /* TransparencyLog+PATLeaf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TransparencyLog+PATLeaf.swift"; sourceTree = "<group>"; };
 		472F61402C73C64A00E8A79F /* TransparencyLog+TLTLeaf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TransparencyLog+TLTLeaf.swift"; sourceTree = "<group>"; };
 		476E901B2C922BDA00E19E47 /* TransparencyLogVerifyInclusionCmd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparencyLogVerifyInclusionCmd.swift; sourceTree = "<group>"; };
-		B9BB75732C9506DA00539D2C /* FileHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileHandle.swift; sourceTree = "<group>"; };
+		B90901E02CA357B200BFC48A /* Digest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Digest.swift; sourceTree = "<group>"; };
+		B941B42E2CAB1178007CE078 /* IdentityProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityProvider.swift; sourceTree = "<group>"; };
+		B941B4372CAB1328007CE078 /* SecIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecIdentity.swift; sourceTree = "<group>"; };
+		B941B43B2CAB13F3007CE078 /* SecTrust.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecTrust.swift; sourceTree = "<group>"; };
+		B941B43E2CAB144A007CE078 /* SecCertificate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecCertificate.swift; sourceTree = "<group>"; };
+		B95F6C4F2CA23B7C00C63B32 /* BuildManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildManifest.swift; sourceTree = "<group>"; };
+		B9BB75752C95075000539D2C /* FileHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileHandle.swift; sourceTree = "<group>"; };
+		B9BB757A2C9918BC00539D2C /* ReleaseVerifyCmd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseVerifyCmd.swift; sourceTree = "<group>"; };
+		B9C2D6E82CB8A0F300CC4285 /* Sequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sequence.swift; sourceTree = "<group>"; };
+		B9CC39E72CAEFF63009B07A0 /* AMRestorableDeviceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AMRestorableDeviceState.swift; sourceTree = "<group>"; };
 		B9DB9D712C8930A30029A1D7 /* AttestationCmd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttestationCmd.swift; sourceTree = "<group>"; };
 		B9DB9D742C89317A0029A1D7 /* AttestationParseCmd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttestationParseCmd.swift; sourceTree = "<group>"; };
 		B9DB9D762C8931DA0029A1D7 /* AttestationVerifyCmd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttestationVerifyCmd.swift; sourceTree = "<group>"; };
 		B9DB9D782C8932C40029A1D7 /* CloudAttestation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAttestation.swift; sourceTree = "<group>"; };
 		B9E09DCC2C936FD100FC3EEF /* Image4Manifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Image4Manifest.swift; sourceTree = "<group>"; };
 		B9ECC04A2C74148D000F969D /* Utils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utils.swift; sourceTree = "<group>"; };
+		C02CDA5F2CCC4E8800B8074E /* ReleaseDumpCmd.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ReleaseDumpCmd.swift; sourceTree = "<group>"; };
+		C02CDA622CCC656000B8074E /* AttestationCanonicalizeCmd.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AttestationCanonicalizeCmd.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -430,6 +582,22 @@
 				139020272C6BF882005F6059 /* Collections in Frameworks */,
 				139020212C6BF859005F6059 /* Atomics in Frameworks */,
 				139020292C6BF88C005F6059 /* NIO in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		13CF3A4B2C90B3E2003B7C83 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				133B29AF2C90BA0300EADAC7 /* NIO in Frameworks */,
+				133B29AB2C90B9F700EADAC7 /* Collections in Frameworks */,
+				13CF3A4C2C90B3E2003B7C83 /* libauthinstall.a in Frameworks */,
+				13CF3A4D2C90B3E2003B7C83 /* libbootpolicy.tbd in Frameworks */,
+				13CF3A4E2C90B3E2003B7C83 /* libImg4Encode.a in Frameworks */,
+				133B29A72C90B9E700EADAC7 /* NIOHTTP1 in Frameworks */,
+				133B29A92C90B9EC00EADAC7 /* SystemPackage in Frameworks */,
+				13CF3A4F2C90B3E2003B7C83 /* libImg4Decode.a in Frameworks */,
+				133B29AD2C90BA0000EADAC7 /* Atomics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -476,6 +644,7 @@
 				135A99872C6BEBC6006F3F3E /* pccvre */,
 				13DB47BF2C6BEC1E008A2C87 /* vrevm */,
 				472F61272C73C53900E8A79F /* Tests.xctest */,
+				13CF3A5B2C90B3E2003B7C83 /* pccutil */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -580,7 +749,9 @@
 			children = (
 				13DB47262C6BEC06008A2C87 /* ReleaseCmd.swift */,
 				13DB47272C6BEC06008A2C87 /* ReleaseDownloadCmd.swift */,
+				C02CDA5F2CCC4E8800B8074E /* ReleaseDumpCmd.swift */,
 				13DB47282C6BEC06008A2C87 /* ReleaseListCmd.swift */,
+				B9BB757A2C9918BC00539D2C /* ReleaseVerifyCmd.swift */,
 			);
 			path = ReleaseCmd;
 			sourceTree = "<group>";
@@ -605,9 +776,14 @@
 			children = (
 				B9DB9D782C8932C40029A1D7 /* CloudAttestation.swift */,
 				13DB472F2C6BEC06008A2C87 /* Data.swift */,
-				B9BB75732C9506DA00539D2C /* FileHandle.swift */,
+				B90901E02CA357B200BFC48A /* Digest.swift */,
+				B9BB75752C95075000539D2C /* FileHandle.swift */,
 				13DB47302C6BEC06008A2C87 /* FileManager.swift */,
 				B9E09DCC2C936FD100FC3EEF /* Image4Manifest.swift */,
+				B941B43E2CAB144A007CE078 /* SecCertificate.swift */,
+				B941B4372CAB1328007CE078 /* SecIdentity.swift */,
+				B941B43B2CAB13F3007CE078 /* SecTrust.swift */,
+				B9C2D6E82CB8A0F300CC4285 /* Sequence.swift */,
 				13DB47312C6BEC06008A2C87 /* String.swift */,
 				13DB47322C6BEC06008A2C87 /* URL.swift */,
 			);
@@ -644,12 +820,14 @@
 		13DB47432C6BEC06008A2C87 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
-				13DB476B2C6BEC06008A2C87 /* CryptexSpec.swift */,
 				13DB473A2C6BEC06008A2C87 /* DarwinInitHelper */,
 				13DB473F2C6BEC06008A2C87 /* HTTPServer */,
 				472F61212C73C52500E8A79F /* MerkleTree */,
 				13DB47402C6BEC06008A2C87 /* AssetHelper.swift */,
-				13DB47412C6BEC06008A2C87 /* DMGHelper.swift */,
+				B95F6C4F2CA23B7C00C63B32 /* BuildManifest.swift */,
+				13DB47412C6BEC06008A2C87 /* CryptexHelper.swift */,
+				13DB476B2C6BEC06008A2C87 /* CryptexSpec.swift */,
+				B941B42E2CAB1178007CE078 /* IdentityProvider.swift */,
 				13DB47422C6BEC06008A2C87 /* Utils.swift */,
 				13DB473E2C6BEC06008A2C87 /* VMEnetBridge.swift */,
 			);
@@ -721,9 +899,9 @@
 				472F613D2C73C64300E8A79F /* TransparencyLog+Leaf.swift */,
 				13DB47632C6BEC06008A2C87 /* TransparencyLog+Leaves.swift */,
 				472F613F2C73C64A00E8A79F /* TransparencyLog+PATLeaf.swift */,
-				472F61402C73C64A00E8A79F /* TransparencyLog+TLTLeaf.swift */,
 				13DB47642C6BEC06008A2C87 /* TransparencyLog+PublicKeys.swift */,
 				13DB47652C6BEC06008A2C87 /* TransparencyLog+SignedObject.swift */,
+				472F61402C73C64A00E8A79F /* TransparencyLog+TLTLeaf.swift */,
 				13DB47662C6BEC06008A2C87 /* TransparencyLog+Trees.swift */,
 			);
 			path = TransparencyLog;
@@ -744,6 +922,7 @@
 			children = (
 				135320DA2C6D1F4D0079186D /* Main.swift */,
 				13DB48282C6BEC64008A2C87 /* pccvre.xcconfig */,
+				13CF3A5C2C90B415003B7C83 /* pccutil.xcconfig */,
 				13DB472E2C6BEC06008A2C87 /* CLI */,
 				13DB47332C6BEC06008A2C87 /* Extensions */,
 				13DB47352C6BEC06008A2C87 /* LoggingProfile */,
@@ -776,6 +955,7 @@
 		13DB47D32C6BEC40008A2C87 /* Extensions */ = {
 			isa = PBXGroup;
 			children = (
+				B9CC39E72CAEFF63009B07A0 /* AMRestorableDeviceState.swift */,
 				13DB47D02C6BEC40008A2C87 /* FileManager.swift */,
 				13DB47D12C6BEC40008A2C87 /* IPAddress.swift */,
 				13DB47D22C6BEC40008A2C87 /* String.swift */,
@@ -920,6 +1100,7 @@
 			isa = PBXGroup;
 			children = (
 				B9DB9D712C8930A30029A1D7 /* AttestationCmd.swift */,
+				C02CDA622CCC656000B8074E /* AttestationCanonicalizeCmd.swift */,
 				B9DB9D742C89317A0029A1D7 /* AttestationParseCmd.swift */,
 				B9DB9D762C8931DA0029A1D7 /* AttestationVerifyCmd.swift */,
 			);
@@ -945,6 +1126,23 @@
 			name = pccvre;
 			productName = pccvre;
 			productReference = 135A99872C6BEBC6006F3F3E /* pccvre */;
+			productType = "com.apple.product-type.tool";
+		};
+		13CF39F82C90B3E2003B7C83 /* pccutil */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 13CF3A582C90B3E2003B7C83 /* Build configuration list for PBXNativeTarget "pccutil" */;
+			buildPhases = (
+				13CF39F92C90B3E2003B7C83 /* Sources */,
+				13CF3A4B2C90B3E2003B7C83 /* Frameworks */,
+			);
+			buildRules = (
+				13CF3A572C90B3E2003B7C83 /* PBXBuildRule */,
+			);
+			dependencies = (
+			);
+			name = pccutil;
+			productName = pccvre;
+			productReference = 13CF3A5B2C90B3E2003B7C83 /* pccutil */;
 			productType = "com.apple.product-type.tool";
 		};
 		13DB47BE2C6BEC1E008A2C87 /* vrevm */ = {
@@ -1032,6 +1230,7 @@
 				135A99862C6BEBC6006F3F3E /* pccvre */,
 				13DB47BE2C6BEC1E008A2C87 /* vrevm */,
 				472F61262C73C53900E8A79F /* Tests */,
+				13CF39F82C90B3E2003B7C83 /* pccutil */,
 			);
 		};
 /* End PBXProject section */
@@ -1065,16 +1264,20 @@
 				13DB477D2C6BEC06008A2C87 /* FileManager.swift in Sources */,
 				13DB477E2C6BEC06008A2C87 /* InstanceCmd.swift in Sources */,
 				472F61412C73C64A00E8A79F /* TransparencyLog+PATLeaf.swift in Sources */,
-				B9BB75742C9506E000539D2C /* FileHandle.swift in Sources */,
 				472F61422C73C64A00E8A79F /* TransparencyLog+TLTLeaf.swift in Sources */,
+				B9BB75762C95075300539D2C /* FileHandle.swift in Sources */,
 				13DB477F2C6BEC06008A2C87 /* CLI.swift in Sources */,
+				B941B4402CAB1453007CE078 /* SecCertificate.swift in Sources */,
 				13DB47802C6BEC06008A2C87 /* VRE+Config.swift in Sources */,
 				13DB47812C6BEC06008A2C87 /* SWReleases.swift in Sources */,
+				B941B4392CAB1330007CE078 /* SecIdentity.swift in Sources */,
 				13DB47822C6BEC06008A2C87 /* ReleaseListCmd.swift in Sources */,
 				13DB47832C6BEC06008A2C87 /* CryptexSpec.swift in Sources */,
 				13DB47842C6BEC06008A2C87 /* LicenseCmd.swift in Sources */,
 				B9DB9D752C8931810029A1D7 /* AttestationParseCmd.swift in Sources */,
 				13DB47852C6BEC06008A2C87 /* ReleaseMetadata.pb.swift in Sources */,
+				C02CDA602CCC4E8800B8074E /* ReleaseDumpCmd.swift in Sources */,
+				B95F6C502CA23B8300C63B32 /* BuildManifest.swift in Sources */,
 				472F61362C73C5BB00E8A79F /* TransparencyLogCmd.swift in Sources */,
 				472F61372C73C5BB00E8A79F /* TransparencyLogAuditCmd.swift in Sources */,
 				13DB47872C6BEC06008A2C87 /* TransparencyLog+Head.swift in Sources */,
@@ -1097,6 +1300,7 @@
 				13DB48242C6BEC4D008A2C87 /* PCCVRELicenseAgreementConstants.swift in Sources */,
 				13DB478F2C6BEC06008A2C87 /* Image4PackageCmd.swift in Sources */,
 				13DB47902C6BEC06008A2C87 /* ReleaseDownloadCmd.swift in Sources */,
+				B941B42F2CAB117E007CE078 /* IdentityProvider.swift in Sources */,
 				13DB47912C6BEC06008A2C87 /* ReleaseCmd.swift in Sources */,
 				13DB47922C6BEC06008A2C87 /* DarwinInitSetCmd.swift in Sources */,
 				13DB47932C6BEC06008A2C87 /* VMEnetBridge.swift in Sources */,
@@ -1117,11 +1321,16 @@
 				13DB479F2C6BEC06008A2C87 /* String.swift in Sources */,
 				13DB47A02C6BEC06008A2C87 /* CryptexAddCmd.swift in Sources */,
 				13DB47A12C6BEC06008A2C87 /* Data.swift in Sources */,
+				B941B43D2CAB13F8007CE078 /* SecTrust.swift in Sources */,
+				B9C2D6EA2CB8A0F700CC4285 /* Sequence.swift in Sources */,
 				13DB47A22C6BEC06008A2C87 /* InstanceInferenceRequestCmd.swift in Sources */,
+				C02CDA632CCC656000B8074E /* AttestationCanonicalizeCmd.swift in Sources */,
+				B9BB757C2C9918BC00539D2C /* ReleaseVerifyCmd.swift in Sources */,
 				13DB47A42C6BEC06008A2C87 /* TransparencyLog+Leaves.swift in Sources */,
 				13DB47A52C6BEC06008A2C87 /* SWReleases+Release+Metadata.swift in Sources */,
+				B90901E22CA357B800BFC48A /* Digest.swift in Sources */,
 				13DB47A62C6BEC06008A2C87 /* TransparencyLog+ATLeaf.swift in Sources */,
-				13DB47A82C6BEC06008A2C87 /* DMGHelper.swift in Sources */,
+				13DB47A82C6BEC06008A2C87 /* CryptexHelper.swift in Sources */,
 				13DB47AB2C6BEC06008A2C87 /* Image4ExtractCmd.swift in Sources */,
 				13DB47AC2C6BEC06008A2C87 /* TransparencyLog+KTInitBag.swift in Sources */,
 				13DB47AD2C6BEC06008A2C87 /* VRE+VM.swift in Sources */,
@@ -1138,6 +1347,110 @@
 				13DB47B82C6BEC06008A2C87 /* AT.tls.swift in Sources */,
 				13DB47B92C6BEC06008A2C87 /* SshCmd.swift in Sources */,
 				13DB47BA2C6BEC06008A2C87 /* ATResearcherApi.pb.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		13CF39F92C90B3E2003B7C83 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B95F6C512CA23B8300C63B32 /* BuildManifest.swift in Sources */,
+				C02CDA642CCC6D0B00B8074E /* AttestationCanonicalizeCmd.swift in Sources */,
+				13CF39FA2C90B3E2003B7C83 /* TransparencyLog+Leaf.swift in Sources */,
+				13CF39FB2C90B3E2003B7C83 /* License.rtf in Sources */,
+				13CF39FD2C90B3E2003B7C83 /* Auditor.swift in Sources */,
+				13CF39FE2C90B3E2003B7C83 /* Auditor+Delegate.swift in Sources */,
+				13CF39FF2C90B3E2003B7C83 /* CryptexListCmd.swift in Sources */,
+				13CF3A002C90B3E2003B7C83 /* InstanceListCmd.swift in Sources */,
+				B941B4302CAB117E007CE078 /* IdentityProvider.swift in Sources */,
+				13CF3A012C90B3E2003B7C83 /* URL.swift in Sources */,
+				13CF3A022C90B3E2003B7C83 /* Transparency.pb.swift in Sources */,
+				13CF3A032C90B3E2003B7C83 /* SWReleases+Release.swift in Sources */,
+				13CF3A042C90B3E2003B7C83 /* TransparencyLog+PublicKeys.swift in Sources */,
+				13CF3A052C90B3E2003B7C83 /* TransparencyLog+SignedObject.swift in Sources */,
+				13CF3A062C90B3E2003B7C83 /* FileManager.swift in Sources */,
+				B9BB755B2C94C07100539D2C /* Image4Manifest.swift in Sources */,
+				13CF3A072C90B3E2003B7C83 /* InstanceCmd.swift in Sources */,
+				13CF3A082C90B3E2003B7C83 /* TransparencyLog+PATLeaf.swift in Sources */,
+				13CF3A092C90B3E2003B7C83 /* TransparencyLog+TLTLeaf.swift in Sources */,
+				13CF3A0A2C90B3E2003B7C83 /* CLI.swift in Sources */,
+				13CF3A0B2C90B3E2003B7C83 /* VRE+Config.swift in Sources */,
+				13CF3A0C2C90B3E2003B7C83 /* SWReleases.swift in Sources */,
+				13CF3A0D2C90B3E2003B7C83 /* ReleaseListCmd.swift in Sources */,
+				13CF3A0E2C90B3E2003B7C83 /* CryptexSpec.swift in Sources */,
+				13CF3A0F2C90B3E2003B7C83 /* LicenseCmd.swift in Sources */,
+				13CF3A102C90B3E2003B7C83 /* ReleaseMetadata.pb.swift in Sources */,
+				13CF3A112C90B3E2003B7C83 /* TransparencyLogCmd.swift in Sources */,
+				C02CDA612CCC59FF00B8074E /* ReleaseDumpCmd.swift in Sources */,
+				13CF3A122C90B3E2003B7C83 /* TransparencyLogAuditCmd.swift in Sources */,
+				13CF3A132C90B3E2003B7C83 /* TransparencyLog+Head.swift in Sources */,
+				13CF3A142C90B3E2003B7C83 /* HTTPServer.swift in Sources */,
+				13CF3A152C90B3E2003B7C83 /* TransparencyLog.swift in Sources */,
+				13CF3A162C90B3E2003B7C83 /* InstanceConfigureCmd.swift in Sources */,
+				B9BB755A2C94C00000539D2C /* AttestationVerifyCmd.swift in Sources */,
+				13CF3A172C90B3E2003B7C83 /* TransparencyLog+Trees.swift in Sources */,
+				13CF3A182C90B3E2003B7C83 /* Utils.swift in Sources */,
+				13CF3A192C90B3E2003B7C83 /* VRE.swift in Sources */,
+				13CF3A1A2C90B3E2003B7C83 /* ATServiceApi.pb.swift in Sources */,
+				13CF3A1B2C90B3E2003B7C83 /* PCCVREUtils.swift in Sources */,
+				13CF3A1C2C90B3E2003B7C83 /* Main.swift in Sources */,
+				13CF3A1D2C90B3E2003B7C83 /* ArgumentVisibility.swift in Sources */,
+				B9C2D6E92CB8A0F700CC4285 /* Sequence.swift in Sources */,
+				13CF3A1E2C90B3E2003B7C83 /* MerkleTree.swift in Sources */,
+				13CF3A202C90B3E2003B7C83 /* PCCVRELicenseAgreementManager.swift in Sources */,
+				13CF3A212C90B3E2003B7C83 /* PCCVRELicenseAgreementConstants.swift in Sources */,
+				13CF3A222C90B3E2003B7C83 /* Image4PackageCmd.swift in Sources */,
+				13CF3A232C90B3E2003B7C83 /* ReleaseDownloadCmd.swift in Sources */,
+				13CF3A242C90B3E2003B7C83 /* ReleaseCmd.swift in Sources */,
+				13CF3A252C90B3E2003B7C83 /* DarwinInitSetCmd.swift in Sources */,
+				13CF3A262C90B3E2003B7C83 /* VMEnetBridge.swift in Sources */,
+				13CF3A272C90B3E2003B7C83 /* InstanceStartCmd.swift in Sources */,
+				13CF3A282C90B3E2003B7C83 /* DarwinInitHelper.swift in Sources */,
+				13CF3A292C90B3E2003B7C83 /* DarwinInitHelper+SSH.swift in Sources */,
+				13CF3A2A2C90B3E2003B7C83 /* DarwinInitDumpCmd.swift in Sources */,
+				13CF3A2B2C90B3E2003B7C83 /* InstanceCreateCmd.swift in Sources */,
+				13CF3A2C2C90B3E2003B7C83 /* AssetHelper.swift in Sources */,
+				13CF3A2D2C90B3E2003B7C83 /* InstanceDiagnosticCmd.swift in Sources */,
+				13CF3A2E2C90B3E2003B7C83 /* CryptexRemoveCmd.swift in Sources */,
+				13CF3A2F2C90B3E2003B7C83 /* InstanceRemoveCmd.swift in Sources */,
+				B90901E12CA357B800BFC48A /* Digest.swift in Sources */,
+				13CF3A302C90B3E2003B7C83 /* MachO+PayloadProperties.swift in Sources */,
+				70D6DACF2C94EB55001DD40F /* TransparencyLogVerifyInclusionCmd.swift in Sources */,
+				B9BB75772C95075300539D2C /* FileHandle.swift in Sources */,
+				B9BB75582C94BFD300539D2C /* AttestationCmd.swift in Sources */,
+				13CF3A312C90B3E2003B7C83 /* MachO+Segment.swift in Sources */,
+				B941B43F2CAB1453007CE078 /* SecCertificate.swift in Sources */,
+				13CF3A322C90B3E2003B7C83 /* MachO+UnixThread.swift in Sources */,
+				13CF3A332C90B3E2003B7C83 /* MachO.swift in Sources */,
+				13CF3A342C90B3E2003B7C83 /* String.swift in Sources */,
+				13CF3A352C90B3E2003B7C83 /* CryptexAddCmd.swift in Sources */,
+				13CF3A362C90B3E2003B7C83 /* Data.swift in Sources */,
+				13CF3A372C90B3E2003B7C83 /* InstanceInferenceRequestCmd.swift in Sources */,
+				13CF3A382C90B3E2003B7C83 /* TransparencyLog+Leaves.swift in Sources */,
+				13CF3A392C90B3E2003B7C83 /* SWReleases+Release+Metadata.swift in Sources */,
+				B9BB75592C94BFF400539D2C /* AttestationParseCmd.swift in Sources */,
+				13CF3A3A2C90B3E2003B7C83 /* TransparencyLog+ATLeaf.swift in Sources */,
+				B941B43C2CAB13F8007CE078 /* SecTrust.swift in Sources */,
+				13CF3A3B2C90B3E2003B7C83 /* CryptexHelper.swift in Sources */,
+				13CF3A3B2C90B3E2003B7C83 /* CryptexHelper.swift in Sources */,
+				13CF3A3C2C90B3E2003B7C83 /* Image4ExtractCmd.swift in Sources */,
+				13CF3A3D2C90B3E2003B7C83 /* TransparencyLog+KTInitBag.swift in Sources */,
+				13CF3A3E2C90B3E2003B7C83 /* VRE+VM.swift in Sources */,
+				13CF3A3F2C90B3E2003B7C83 /* KtClientApi.pb.swift in Sources */,
+				13CF3A402C90B3E2003B7C83 /* DarwinInitCmd.swift in Sources */,
+				B9BB757B2C9918BC00539D2C /* ReleaseVerifyCmd.swift in Sources */,
+				13CF3A412C90B3E2003B7C83 /* TransparencyByteBuffer.swift in Sources */,
+				13CF3A422C90B3E2003B7C83 /* CryptexCmd.swift in Sources */,
+				13CF3A432C90B3E2003B7C83 /* DarwinInitHelper+Cryptex.swift in Sources */,
+				13CF3A442C90B3E2003B7C83 /* AuditorApi.pb.swift in Sources */,
+				B941B4382CAB1330007CE078 /* SecIdentity.swift in Sources */,
+				13CF3A452C90B3E2003B7C83 /* Image4Cmd.swift in Sources */,
+				B941B4412CAB5113007CE078 /* CloudAttestation.swift in Sources */,
+				13CF3A462C90B3E2003B7C83 /* CryptexCreateCmd.swift in Sources */,
+				13CF3A472C90B3E2003B7C83 /* HTTPHandler.swift in Sources */,
+				13CF3A482C90B3E2003B7C83 /* AT.tls.swift in Sources */,
+				13CF3A492C90B3E2003B7C83 /* SshCmd.swift in Sources */,
+				13CF3A4A2C90B3E2003B7C83 /* ATResearcherApi.pb.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1171,6 +1484,7 @@
 				13DB47FA2C6BEC40008A2C87 /* String.swift in Sources */,
 				13DB47FB2C6BEC40008A2C87 /* VM-restore.swift in Sources */,
 				13DB47FC2C6BEC40008A2C87 /* FileManager.swift in Sources */,
+				B9CC39EB2CAF138B009B07A0 /* AMRestorableDeviceState.swift in Sources */,
 				13DB47FD2C6BEC40008A2C87 /* VM-create.swift in Sources */,
 				13DB47FE2C6BEC40008A2C87 /* CLI+RestoreCmd.swift in Sources */,
 				13DB47FF2C6BEC40008A2C87 /* VM+NetworkConfig.swift in Sources */,
@@ -1196,6 +1510,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		133B29B12C90BAC600EADAC7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 13CF39F82C90B3E2003B7C83 /* pccutil */;
+			targetProxy = 133B29B02C90BAC600EADAC7 /* PBXContainerItemProxy */;
+		};
 		13C5BC992C6D02070043288D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 135A99862C6BEBC6006F3F3E /* pccvre */;
@@ -1251,6 +1570,24 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		13CF3A592C90B3E2003B7C83 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 13CF3A5C2C90B415003B7C83 /* pccutil.xcconfig */;
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 15.1;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		13CF3A5A2C90B3E2003B7C83 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 13CF3A5C2C90B415003B7C83 /* pccutil.xcconfig */;
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
@@ -1433,6 +1770,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		13CF3A582C90B3E2003B7C83 /* Build configuration list for PBXNativeTarget "pccutil" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				13CF3A592C90B3E2003B7C83 /* Debug */,
+				13CF3A5A2C90B3E2003B7C83 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		13DB47C32C6BEC1E008A2C87 /* Build configuration list for PBXNativeTarget "vrevm" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1481,6 +1827,28 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		133B29A62C90B9E700EADAC7 /* NIOHTTP1 */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NIOHTTP1;
+		};
+		133B29A82C90B9EC00EADAC7 /* SystemPackage */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SystemPackage;
+		};
+		133B29AA2C90B9F700EADAC7 /* Collections */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 139992A72C6BF77D00220A44 /* XCLocalSwiftPackageReference "../Vendor/swift-collections" */;
+			productName = Collections;
+		};
+		133B29AC2C90BA0000EADAC7 /* Atomics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 139992A62C6BF76A00220A44 /* XCLocalSwiftPackageReference "../Vendor/swift-atomics" */;
+			productName = Atomics;
+		};
+		133B29AE2C90BA0300EADAC7 /* NIO */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NIO;
+		};
 		139020202C6BF859005F6059 /* Atomics */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Atomics;

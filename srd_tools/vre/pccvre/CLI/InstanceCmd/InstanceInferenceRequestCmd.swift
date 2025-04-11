@@ -41,6 +41,10 @@ extension CLI.InstanceCmd {
                 help: "LLM inference prompt, commonly a question in English language.")
         var prompt: String
 
+        @Flag(name: [.customLong("skip-health-check")],
+              help: "Skip performing availability check using cloudremotediagctl.")
+        var skipHealthCheck: Bool = false
+
         @Option(name: [.customLong("max-tokens")],
                 help: ArgumentHelp("""
                 Finish inference after generating specified number of tokens.
@@ -89,6 +93,18 @@ extension CLI.InstanceCmd {
                 throw CLIError("unable to determine IP address of VRE \(vreName)")
             }
 
+            if !skipHealthCheck {
+                guard let vreRSDname = try vre.status().rsdname else {
+                    throw CLIError("unable to determine RSD name of VRE \(vreName): may not be ready")
+                }
+
+                guard let cbAvailable = try? cloudboardAvailable(toolsDir: toolsDir, rsdName: vreRSDname),
+                      cbAvailable
+                else {
+                    throw CLIError("inference service not (yet) available")
+                }
+            }
+
             let tiePayload = try tiePayload()
 
             do {
@@ -102,6 +118,83 @@ extension CLI.InstanceCmd {
             }
 
             CLI.logger.log("inference call completed without error")
+        }
+
+        // cloudboardAvailable returns true if cloud-board-health (from cloudremotediagctl indicates "healthy"),
+        //  false otherwise -- error thrown if unable to complete call or parse result
+        private func cloudboardAvailable(
+            toolsDir: URL,
+            rsdName: String
+        ) throws -> Bool {
+            let envvars = [
+                "DYLD_FRAMEWORK_PATH": "\(toolsDir.path)/System/Library/PrivateFrameworks/"
+            ]
+
+            let diagCMD = "cloudremotediagctl"
+            let diagCLI = "\(toolsDir.path)/usr/local/bin/\(diagCMD)"
+            guard FileManager.isRegularFile(diagCLI) else {
+                throw CLIError("unable to find diag tool")
+            }
+
+            let commandLine = [diagCLI, "--device=\(rsdName)", "get-cloud-board-health"]
+            let logMsg = "cloudremotediagctl call: [env: \(envvars)] \(commandLine.joined(separator: " "))"
+            CLI.logger.log("\(logMsg, privacy: .public)")
+
+            let (exitCode, stdOutput, stdError) = try ExecCommand(commandLine, envvars: envvars).run(
+                outputMode: .capture,
+                queue: DispatchQueue(label: "\(applicationName).ExecCommand")
+            )
+
+            guard exitCode == 0 else {
+                if !stdError.isEmpty {
+                    CLI.logger.error("cloudremotediagctl error: \(stdError, privacy: .public)")
+                }
+
+                throw CLIError("cloudremotediagctl returned exitCode=\(exitCode)")
+            }
+
+            CLI.logger.log("cloudremotediagctl result: \(stdOutput, privacy: .public)")
+
+            // expecting result: {"CloudBoardHealthState":"healthy"} or {..: "unhealthy"}
+            guard let statusData = stdOutput.data(using: .utf8),
+                  let cbStateJSON = try? JSONSerialization.jsonObject(with: statusData,
+                                                                      options: []) as? [String: String],
+                  let cbState = cbStateJSON["CloudBoardHealthState"]
+            else {
+                throw CLIError("cloudremotediagctl: couldn't parse json result")
+            }
+
+            return cbState == "healthy"
+        }
+
+        private func tiePayload() throws -> String {
+            guard let escapedPrompt = try String(data: JSONEncoder().encode(prompt), encoding: .utf8) else {
+                throw CLIError("Unable to escape the prompt for JSON")
+            }
+
+            return #"""
+            {
+                "prompt_template": {
+                    "prompt_template_v1": {
+                        "prompt_template_id": "com.apple.gm.instruct.genericChat",
+                        "prompt_template_variable_bindings": [
+                            {
+                                "name": "userPrompt",
+                                "value": \#(escapedPrompt)
+                            }
+                        ]
+                    }
+                },
+                "model_config": {
+                    "model_name": "com.apple.fm.language.research.base",
+                    "model_adaptor_name": "com.apple.fm.language.research.adapter",
+                    "tokenizer_name": "com.apple.fm.language.research.tokenizer",
+                    "options": {
+                        "max_tokens": \#(maxTokens)
+                    }
+                }
+            }
+            """#
         }
 
         private func performInference(
@@ -129,48 +222,14 @@ extension CLI.InstanceCmd {
             CLI.logger.log("\(logMsg, privacy: .public)")
 
             print("Executing inference:")
-            let (exitCode, _, errOut) = try ExecCommand(commandLine, envvars: envvars).run(
-                outputMode: .tee,
+            let (exitCode, _, _) = try ExecCommand(commandLine, envvars: envvars).run(
+                outputMode: .terminal,
                 queue: DispatchQueue(label: "\(applicationName).ExecCommand")
             )
 
             guard exitCode == 0 else {
-                if !errOut.isEmpty {
-                    CLI.logger.error("tie-cli error: \(errOut, privacy: .public)")
-                }
-
                 throw CLIError("exitCode=\(exitCode)")
             }
-        }
-
-        private func tiePayload() throws -> String {
-            guard let escapedPrompt = try String(data: JSONEncoder().encode(prompt), encoding: .utf8) else {
-                throw CLIError("Unable to escape the prompt for JSON")
-            }
-
-            return #"""
-{
-    "prompt_template": {
-        "prompt_template_v1": {
-            "prompt_template_id": "com.apple.gm.instruct.genericChat",
-            "prompt_template_variable_bindings": [
-                {
-                    "name": "userPrompt",
-                    "value": \#(escapedPrompt)
-                }
-            ]
-        }
-    },
-    "model_config": {
-        "model_name": "com.apple.fm.language.research.base",
-        "model_adaptor_name": "com.apple.fm.language.research.adapter",
-        "tokenizer_name": "com.apple.fm.language.research.tokenizer",
-        "options": {
-            "max_tokens": \#(maxTokens)
-        }
-    }
-}
-"""#
         }
     }
 }

@@ -22,7 +22,7 @@ public protocol CloudBoardJobAuthAPIClientProtocol: CloudBoardJobAuthAPIClientTo
     func connect() async
 }
 
-public protocol CloudBoardJobAuthAPIClientToServerProtocol: AnyActor, Sendable {
+public protocol CloudBoardJobAuthAPIClientToServerProtocol: Actor {
     /// Returns the DER-encoded public TGT RSA signing key in PKCS#1 format
     func requestTGTSigningKeys() async throws -> [SigningKey]
     /// Returns the DER-encoded public OTT RSA signing key in PKCS#1 format

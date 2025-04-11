@@ -200,6 +200,8 @@
       "NodeOperationalStatus": {
         "type": "string",
         "enum": [
+          "UNKNOWN",
+          "FUNCTIONAL",
           "UNINITIALIZED",
           "INITIALIZING",
           "WAITING_FOR_FIRST_ATTESTATION_FETCH",
@@ -211,7 +213,8 @@
           "SERVICE_DISCOVERY_UPDATE_FAILURE",
           "SERVICE_DISCOVERY_PUBLISHER_DRAINING",
           "DAEMON_DRAINED",
-          "DAEMON_EXITING_ON_ERROR"
+          "DAEMON_EXITING_ON_ERROR",
+          "HEARTBEAT_TIMEOUT"
         ]
       },
       "PayloadMetadata": {
@@ -235,9 +238,9 @@
           "workloadEnabled": {
             "type": "boolean"
           },
-          "cryptexes": {
-            "type": "array",
-            "items": {
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
               "type": "string"
             }
           }

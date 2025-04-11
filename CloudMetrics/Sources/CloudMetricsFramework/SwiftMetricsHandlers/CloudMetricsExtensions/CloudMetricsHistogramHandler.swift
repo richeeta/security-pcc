@@ -19,6 +19,8 @@
 //  Created by Andrea Guzzo on 8/2/23.
 //
 
+internal import CloudMetricsConstants
+internal import CloudMetricsXPC
 import Foundation
 import os
 
@@ -27,6 +29,7 @@ public class Histogram {
     private let label: String
     private let dimensions: [(String, String)]
     private let buckets: [Double]
+    private static let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "HistogramHandler")
 
     /// Alternative way to create a new `Histogram`, while providing an explicit `HistogramHandler`.
     ///
@@ -89,6 +92,7 @@ public class Histogram {
 extension Histogram {
     public convenience init(label: String, dimensions: [(String, String)], buckets: [Double]) throws {
         guard let factory = CloudMetrics.sharedFactory else {
+            Self.logger.warning("Attempted to create a histogram before the factory was initialised")
             throw CloudMetricsTypeError.apiMisuse("Factory not initiliazed")
         }
         let handler = factory.makeHistogram(label: label, dimensions: dimensions, buckets: buckets)
@@ -98,7 +102,11 @@ extension Histogram {
     /// Signal the underlying metrics library that this recorder will never be updated again.
     /// In response the library MAY decide to eagerly release any resources held by this `Histogram`.
     public func destroy() {
-        CloudMetrics.sharedFactory?.destroyHistogram(self._handler)
+        guard let factory = CloudMetrics.sharedFactory else {
+            Self.logger.warning("Attempted to destroy  a histogram before the factory was initialised")
+            return
+        }
+        factory.destroyHistogram(self._handler)
     }
 }
 
@@ -106,70 +114,45 @@ public protocol HistogramHandler: AnyObject, RecorderHandler {
     func record(bucketValues: [Int], sum: Double, count: Int)
 }
 
-internal class CloudMetricsHistogramHandler: HistogramHandler {
+internal final class CloudMetricsHistogramHandler: HistogramHandler {
     private let histogram: CloudMetricsHistogram
-    private let logger: Logger
-    private weak var cloudMetrics: CloudMetricsFactory?
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsHistogramHandler")
+    private let metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation
 
-    internal init(cloudMetrics: CloudMetricsFactory, histogram: CloudMetricsHistogram) {
+    internal init(metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation,
+                  histogram: CloudMetricsHistogram) {
         self.histogram = histogram
-        self.logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsHistogramHandler")
-        self.cloudMetrics = cloudMetrics
+        self.metricUpdateContinuation = metricUpdateContinuation
     }
 
     internal func record(_ value: Int64) {
         let histogram = self.histogram
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordInteger(histogram: histogram,
-                                                                   buckets: histogram.buckets,
-                                                                   value: value,
-                                                                   epoch: epoch)
-                } catch {
-                    logger.debug("Can't record integer for '\(histogram.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordHistogramInteger(.init(
+            histogram,
+            buckets: histogram.buckets,
+            value: value,
+            epoch: epoch)))
     }
 
     internal func record(_ value: Double) {
         let histogram = self.histogram
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordDouble(histogram: histogram,
-                                                                  buckets: histogram.buckets,
-                                                                  value: value,
-                                                                  epoch: epoch)
-                } catch {
-                    logger.debug("Can't record double for '\(histogram.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordHistogramDouble(.init(
+            histogram,
+            buckets: histogram.buckets,
+            value: value,
+            epoch: epoch)))
     }
 
     internal func record(bucketValues: [Int], sum: Double, count: Int) {
         let histogram = self.histogram
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordBuckets(histogram: histogram,
-                                                                   buckets: histogram.buckets,
-                                                                   bucketValues: bucketValues,
-                                                                   sum: sum,
-                                                                   count: count,
-                                                                   epoch: epoch)
-                } catch {
-                    logger.debug("Can't record buckets for '\(histogram.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordHistogramBuckets(
+            .init(histogram, buckets: histogram.buckets,
+                  values: bucketValues,
+                  sum: sum,
+                  count: count,
+                  epoch: epoch)))
     }
 }

@@ -60,7 +60,7 @@ public actor CloudBoardDaemon {
 
     private let healthMonitor: ServiceHealthMonitor
     private let heartbeatPublisher: HeartbeatPublisher?
-    private let requestFielderManager: RequestFielderManager?
+    private let jobHelperInstanceProvider: JobHelperInstanceProvider?
     private let jobHelperClientProvider: CloudBoardJobHelperClientProvider
     private let jobHelperResponseDelegateProvider: CloudBoardJobHelperResponseDelegateProvider
     private let serviceDiscovery: ServiceDiscoveryPublisher?
@@ -114,16 +114,16 @@ public actor CloudBoardDaemon {
         self.tracer = RequestSummaryTracer(metrics: metricsSystem)
         self.healthMonitor = ServiceHealthMonitor()
         self.healthServer = HealthServer()
-        self.requestFielderManager = try RequestFielderManager(
+        self.jobHelperInstanceProvider = try JobHelperInstanceProvider(
             prewarmedPoolSize: config.prewarming?.prewarmedPoolSize ?? 3,
             maxProcessCount: config.prewarming?.maxProcessCount ?? 3,
             metrics: self.metricsSystem,
             tracer: self.tracer
         )
         self.jobHelperClientProvider = try CloudBoardJobHelperXPCClientProvider(
-            instanceManager: self.requestFielderManager!
+            instanceProvider: self.jobHelperInstanceProvider!
         )
-        self.jobHelperResponseDelegateProvider = CloudBoardProvider.JobHelperResponseDelegateProvider()
+        self.jobHelperResponseDelegateProvider = JobHelperResponseDelegateProvider()
         self.config = config
         let hotProperties = HotPropertiesController()
         self.hotProperties = hotProperties
@@ -196,22 +196,22 @@ public actor CloudBoardDaemon {
         self.serviceDiscovery = serviceDiscoveryPublisher
         if let jobHelperClientProvider {
             self.jobHelperClientProvider = jobHelperClientProvider
-            self.requestFielderManager = nil
+            self.jobHelperInstanceProvider = nil
         } else {
-            self.requestFielderManager = try RequestFielderManager(
+            self.jobHelperInstanceProvider = try JobHelperInstanceProvider(
                 prewarmedPoolSize: config.prewarming?.prewarmedPoolSize ?? 0,
                 maxProcessCount: config.prewarming?.maxProcessCount ?? 0,
                 metrics: self.metricsSystem,
                 tracer: self.tracer
             )
             self.jobHelperClientProvider = try CloudBoardJobHelperXPCClientProvider(
-                instanceManager: self.requestFielderManager!
+                instanceProvider: self.jobHelperInstanceProvider!
             )
         }
         if let jobHelperResponseDelegateProvider {
             self.jobHelperResponseDelegateProvider = jobHelperResponseDelegateProvider
         } else {
-            self.jobHelperResponseDelegateProvider = CloudBoardProvider.JobHelperResponseDelegateProvider()
+            self.jobHelperResponseDelegateProvider = JobHelperResponseDelegateProvider()
         }
         if let lifecycleManager {
             self.lifecycleManager = lifecycleManager
@@ -332,7 +332,6 @@ public actor CloudBoardDaemon {
                 )
                 cloudBoardProvider.withLock { $0 = cloudboardProvider }
 
-                let expectedPeerAPRN = self.config.grpc?.expectedPeerAPRN
                 let keepalive = self.config.grpc?.keepalive
                 let identityCallback = if !self.insecureListener {
                     identityManager.identityCallback
@@ -342,9 +341,9 @@ public actor CloudBoardDaemon {
 
                 try await withErrorLogging(operation: "cloudboardDaemon task group", sensitiveError: false) {
                     try await withThrowingTaskGroup(of: Void.self) { group in
-                        if let requestFielderManager = self.requestFielderManager {
+                        if let jobHelperInstanceProvider = self.jobHelperInstanceProvider {
                             group.addTask {
-                                try await requestFielderManager.run()
+                                try await jobHelperInstanceProvider.run()
                             }
                         }
 
@@ -422,12 +421,23 @@ public actor CloudBoardDaemon {
 
                         group.addTaskWithLogging(operation: "gRPC server", sensitiveError: false) {
                             do {
+                                let expectedPeerAPRNs: [APRN]? = if let aprns = self.config.grpc?.expectedPeerAPRNs {
+                                    try aprns.map { try APRN(string: $0) }
+                                } else if let aprn = self.config.grpc?.expectedPeerAPRN {
+                                    try [APRN(string: aprn)]
+                                } else {
+                                    nil
+                                }
+                                CloudBoardDaemon.logger.log(
+                                    "Configured expected peer APRNs: \(expectedPeerAPRNs.map { "\($0)" } ?? "nil", privacy: .public)"
+                                )
+
                                 try await Self.runServer(
                                     cloudBoardProvider: cloudboardProvider,
                                     providers: [healthProvider],
                                     identityCallback: identityCallback,
                                     serviceAddress: serviceAddress,
-                                    expectedPeerAPRN: expectedPeerAPRN.map { try APRN(string: $0) },
+                                    expectedPeerAPRNs: expectedPeerAPRNs,
                                     keepalive: keepalive.map { .init($0) },
                                     watchdogService: self.watchdogService,
                                     portPromise: portPromise,
@@ -447,7 +457,9 @@ public actor CloudBoardDaemon {
                                             serviceDiscoveryPublisher: serviceDiscovery,
                                             concurrentRequestCountStream: cloudboardProvider
                                                 .concurrentRequestCountStream,
-                                            providerPause: cloudboardProvider.pause
+                                            providerPause: cloudboardProvider.pause,
+                                            restartPrewarmedInstances: self.jobHelperInstanceProvider?
+                                                .restartPrewarmedInstances
                                         )
 
                                     } catch {
@@ -480,6 +492,15 @@ public actor CloudBoardDaemon {
                 }
             } onDrain: {
                 drainTimeMeasurement.withLock { $0 = ContinuousTimeMeasurement.start() }
+                let activeRequestsBeforeDrain = cloudBoardProvider.withLock { $0?.activeRequestsBeforeDrain }
+                if let activeRequestsBeforeDrain {
+                    self.metricsSystem.emit(
+                        Metrics.CloudBoardDaemon.DrainStartCounter(
+                            action: .increment,
+                            dimensions: [.activeRequests: "\(activeRequestsBeforeDrain)"]
+                        )
+                    )
+                }
             } onDrainCompleted: {
                 let activeRequests = cloudBoardProvider.withLock { $0?.activeRequestsBeforeDrain }
                 let drainDuration = drainTimeMeasurement.withLock { $0?.duration }
@@ -534,7 +555,7 @@ public actor CloudBoardDaemon {
         providers: [CallHandlerProvider],
         identityCallback: GRPCTLSConfiguration.IdentityCallback?,
         serviceAddress: SocketAddress,
-        expectedPeerAPRN: APRN?,
+        expectedPeerAPRNs: [APRN]?,
         keepalive: ServerConnectionKeepalive?,
         watchdogService: CloudBoardWatchdogService?,
         portPromise: Promise<Int, Error>? = nil,
@@ -556,7 +577,7 @@ public actor CloudBoardDaemon {
             providers: [cloudBoardProvider] + providers,
             identityCallback: identityCallback,
             serviceAddress: serviceAddress,
-            expectedPeerAPRN: expectedPeerAPRN,
+            expectedPeerAPRNs: expectedPeerAPRNs,
             keepalive: keepalive,
             portPromise: portPromise,
             metricsSystem: metricsSystem
@@ -578,7 +599,7 @@ public actor CloudBoardDaemon {
         providers: [CallHandlerProvider],
         identityCallback: GRPCTLSConfiguration.IdentityCallback?,
         serviceAddress: SocketAddress,
-        expectedPeerAPRN: APRN?,
+        expectedPeerAPRNs: [APRN]?,
         keepalive: ServerConnectionKeepalive?,
         portPromise: Promise<Int, Error>? = nil,
         metricsSystem: MetricsSystem
@@ -598,7 +619,7 @@ public actor CloudBoardDaemon {
                 CloudBoardDaemon.logger.info("Running service with TLS.")
                 let config = try GRPCTLSConfiguration.cloudboardProviderConfiguration(
                     identityCallback: identityCallback,
-                    expectedPeerAPRN: expectedPeerAPRN,
+                    expectedPeerAPRNs: expectedPeerAPRNs,
                     metricsSystem: metricsSystem
                 )
                 var serverBuilder = Server.usingTLS(with: config, on: group)
@@ -668,7 +689,7 @@ struct CloudBoardDaemonLogMetadata: CustomStringConvertible {
             text.append("requestTrackingID=\(requestTrackingID) ")
         }
         if let remotePID = self.remotePID {
-            text.append("remotePID=\(remotePID) ")
+            text.append("remotePid=\(remotePID) ")
         }
 
         text.removeLast(1)

@@ -36,7 +36,7 @@ public final class TrustedCloudComputeClient: Sendable {
     /// - Parameters:
     /// - configuration: The configuration to use for the client.
     public init(configuration: Configuration) throws {
-        self.logger = tc2Logger(forCategory: .Client)
+        self.logger = tc2Logger(forCategory: .client)
         self.client = TC2Client(userID: configuration.userID)
         self.configuration = configuration
     }
@@ -184,8 +184,8 @@ extension TrustedRequestHistory.Request {
         self.init(
             request: .init(
                 id: requestMetadata.serverRequestID,
-                workloadType: requestMetadata.parameters.pipelineKind,
-                workloadParameters: requestMetadata.parameters.pipelineArguments,
+                workloadType: requestMetadata.workloadName,
+                workloadParameters: requestMetadata.workloadParameters,
                 bundleIdentifier: requestMetadata.bundleIdentifier,
                 featureIdentifier: requestMetadata.featureIdentifier,
                 sessionIdentifier: requestMetadata.sessionIdentifier

@@ -44,7 +44,7 @@ internal final class XPCObjectEncoder {
     /// will be overwritten if they conflict with those being encoded. This is
     /// intended for use with, e.g. the reply dictionary provided by
     /// `xpc_dictionary_create_reply()`.
-    internal func encode(_ value: some Encodable, into dictionary: xpc_object_t) throws {
+    private func encode(_ value: some Encodable, into dictionary: xpc_object_t) throws {
         guard xpc_get_type(dictionary) == XPC_TYPE_DICTIONARY else {
             throw EncodingError.invalidValue(dictionary, .init(
                 codingPath: [],
@@ -66,7 +66,7 @@ internal final class XPCObjectEncoder {
     }
 
     /// Flatten an encodable something into an existing `XPCDictionary`.
-    internal func encode(_ value: some Encodable, into dictionary: inout XPCDictionary) throws {
+    private func encode(_ value: some Encodable, into dictionary: inout XPCDictionary) throws {
         try dictionary.withUnsafeUnderlyingDictionary { dictionary in
             try self.encode(value, into: dictionary)
         }

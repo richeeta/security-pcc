@@ -18,11 +18,11 @@ import CloudBoardJobAuthDAPI
 import CryptoKit
 import Foundation
 
-protocol AuthTokenSigningKeyUpdateWatcher {
+protocol AuthTokenSigningKeyUpdateWatcher: Sendable {
     func authTokenKeysUpdated(newKeySet: AuthTokenKeySet) async throws
 }
 
-protocol AuthTokenSigningKeyProvider {
+protocol AuthTokenSigningKeyProvider: Sendable {
     /// Returns DER-encoded TGT signing public key
     func requestTGTSigningKeys() async throws -> [SigningKey]
     /// Returns DER-encoded TGT signing public key
@@ -39,7 +39,7 @@ final class StaticAuthTokenSigningKeyProvider: AuthTokenSigningKeyProvider {
         case ottKeyIsUnavailable
     }
 
-    var signingKeys: CloudBoardJobAuthDConfiguration.StaticPublicSigningKeys
+    let signingKeys: CloudBoardJobAuthDConfiguration.StaticPublicSigningKeys
 
     public init(signingKeys: CloudBoardJobAuthDConfiguration.StaticPublicSigningKeys) {
         self.signingKeys = signingKeys

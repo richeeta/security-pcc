@@ -21,28 +21,29 @@ import os
 #endif
 
 public enum EnsembleWatchdogService {
-    private static let endpoint: String = "com.apple.cloudos.AppleComputeEnsembler.watchdog"
-    
-    public static func activate() async {
-        #if canImport(cloudOSWatchdogClient)
-        if #_hasSymbol(WatchdogService.self) {
-            do {
-                try await WatchdogService.shared.activate(machServiceName: Self.endpoint)
-            } catch {
-                EnsemblerService.logger
-                    .error(
-                        "cloudOSWatchdogClient threw an error during activate(): \(String(reportableError: error), privacy: .public) (\(error, privacy: .public))"
-                    )
-                return
-            }
-            EnsemblerService.logger.log("activated watchdog service endpoint \(Self.endpoint, privacy: .public)")
-        } else {
-            EnsemblerService.logger.error("cloudOSWatchdogClient not available (runtime)")
-            return
-        }
-        #else
-        self.logger.error("cloudOSWatchdogClient not available (build time)")
-        return
-        #endif
-    }
+	private static let endpoint: String = "com.apple.cloudos.AppleComputeEnsembler.watchdog"
+
+	public static func activate() async {
+		#if canImport(cloudOSWatchdogClient)
+		if #_hasSymbol(WatchdogService.self) {
+			do {
+				try await WatchdogService.shared.activate(machServiceName: Self.endpoint)
+			} catch {
+				EnsemblerService.logger
+					.error(
+						"cloudOSWatchdogClient threw an error during activate(): \(String(reportableError: error), privacy: .public) (\(error, privacy: .public))"
+					)
+				return
+			}
+			EnsemblerService.logger
+				.log("activated watchdog service endpoint \(Self.endpoint, privacy: .public)")
+		} else {
+			EnsemblerService.logger.error("cloudOSWatchdogClient not available (runtime)")
+			return
+		}
+		#else
+		self.logger.error("cloudOSWatchdogClient not available (build time)")
+		return
+		#endif
+	}
 }

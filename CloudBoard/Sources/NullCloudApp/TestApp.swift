@@ -23,7 +23,7 @@ struct TestApp {
     func run(input: InputData, responder: ResponseWriter, environment: CloudAppEnvironment) async throws {
         let requestID = environment.plaintextMetadata.requestID
         NullCloudApp.log.log("""
-        requestId=\(requestID, privacy: .public)
+        request.uuid=\(requestID, privacy: .public)
         message=Hello from NullCloudApp: test flavour
         """)
         let clock = ContinuousClock()
@@ -34,7 +34,7 @@ struct TestApp {
             if let crashBeforeFirstResponseToken = parameters.crashBeforeFirstResponseToken,
                crashBeforeFirstResponseToken {
                 NullCloudApp.log.log("""
-                requestId=\(requestID, privacy: .public)
+                request.uuid=\(requestID, privacy: .public)
                 message=Crashing as instructed before first token
                 """)
                 if parameters.crashWithFatalError ?? false {
@@ -49,7 +49,7 @@ struct TestApp {
             for tokenNumber in 0 ..< parameters.responseTokenCount {
                 if tokenNumber == 0 {
                     NullCloudApp.log.log("""
-                    requestId=\(requestID, privacy: .public)
+                    request.uuid=\(requestID, privacy: .public)
                     message=Sleeping for first token
                     """)
                     try await clock.sleep(for: .milliseconds(parameters.timeToFirstTokenMilliseconds))
@@ -59,7 +59,7 @@ struct TestApp {
                     // https://confluence.sd.apple.com/pages/viewpage.action?spaceKey=DarwinSystemTools&title=logd+Configuration+Preferences
                     if tokenNumber % 100 == 0 {
                         NullCloudApp.log.log("""
-                        requestId=\(requestID, privacy: .public)
+                        request.uuid=\(requestID, privacy: .public)
                         message=Sleeping for token number \(tokenNumber)
                         """)
                     }
@@ -67,7 +67,7 @@ struct TestApp {
                 }
                 if let crashOnResponseToken = parameters.crashOnResponseToken, tokenNumber == crashOnResponseToken {
                     NullCloudApp.log.log("""
-                    requestId=\(requestID, privacy: .public)
+                    request.uuid=\(requestID, privacy: .public)
                     message=Crashing as instructed on token number \(tokenNumber)
                     """)
                     if parameters.crashWithFatalError ?? false {
@@ -78,7 +78,7 @@ struct TestApp {
                 }
                 if tokenNumber % 100 == 0 {
                     NullCloudApp.log.log("""
-                    requestId=\(requestID, privacy: .public)
+                    request.uuid=\(requestID, privacy: .public)
                     message=Sending token number \(tokenNumber)
                     """)
                 }
@@ -86,14 +86,14 @@ struct TestApp {
             }
 
             NullCloudApp.log.log("""
-            requestId=\(requestID, privacy: .public)
+            request.uuid=\(requestID, privacy: .public)
             message=Tokens complete, terminating stream.
             """)
             try responder.finish()
 
             if parameters.crashOnResponseToken != nil {
                 NullCloudApp.log.log("""
-                requestId=\(requestID, privacy: .public)
+                request.uuid=\(requestID, privacy: .public)
                 message=Crashing after completing response stream.
                 """)
                 if parameters.crashWithFatalError ?? false {

@@ -23,7 +23,7 @@ import CloudSubscriptionFeatures
 @_implementationOnly import DarwinPrivate.os.variant
 import PrivateCloudCompute
 
-private let logger = tc2Logger(forCategory: .Configuration)
+private let logger = tc2Logger(forCategory: .configuration)
 
 extension TC2Configuration {
     private func appendCSFBypassIfNeeded(toString string: String) -> String {

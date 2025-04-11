@@ -24,7 +24,7 @@ private let defaultLogger: Logger = .init(
 extension TaskGroup {
     public mutating func addTaskWithLogging(
         operation: String,
-        diagnosticKeys: some CustomStringConvertible,
+        diagnosticKeys: some CustomStringConvertible & Sendable,
         sensitiveError: Bool = true,
         logger: Logger? = nil,
         level: OSLogType = .info,
@@ -64,7 +64,7 @@ extension TaskGroup {
 extension DiscardingTaskGroup {
     public mutating func addTaskWithLogging(
         operation: String,
-        diagnosticKeys: some CustomStringConvertible,
+        diagnosticKeys: some CustomStringConvertible & Sendable,
         sensitiveError: Bool = true,
         logger: Logger? = nil,
         level: OSLogType = .info,
@@ -104,7 +104,7 @@ extension DiscardingTaskGroup {
 extension ThrowingTaskGroup {
     public mutating func addTaskWithLogging(
         operation: String,
-        diagnosticKeys: some CustomStringConvertible,
+        diagnosticKeys: some CustomStringConvertible & Sendable,
         sensitiveError: Bool = true,
         logger: Logger? = nil,
         level: OSLogType = .info,
@@ -125,7 +125,7 @@ extension ThrowingTaskGroup {
 
     public mutating func addTaskWithLogging(
         operation: String,
-        diagnosticKeys: some CustomStringConvertible,
+        diagnosticKeys: some CustomStringConvertible & Sendable,
         sensitiveError: Bool = true,
         logger: Logger? = nil,
         _ body: @Sendable @escaping () async throws -> ChildTaskResult
@@ -178,7 +178,7 @@ extension ThrowingTaskGroup {
 extension ThrowingDiscardingTaskGroup {
     public mutating func addTaskWithLogging(
         operation: String,
-        diagnosticKeys: some CustomStringConvertible,
+        diagnosticKeys: some CustomStringConvertible & Sendable,
         sensitiveError: Bool = true,
         logger: Logger? = nil,
         _ body: @Sendable @escaping () async throws -> Void

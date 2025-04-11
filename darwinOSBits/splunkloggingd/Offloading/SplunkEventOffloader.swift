@@ -28,6 +28,22 @@ import notify
 
 fileprivate let log = Logger(subsystem: sharedSubsystem, category: "SplunkEventOffloader")
 
+fileprivate let kNotificationFailureName = CFNotificationName("com.apple.splunkloggingd.postFailure" as CFString)
+fileprivate func postFailureNotification() {
+    #if os(iOS)
+    // Only one per process, always returns the same center
+    guard let center = CFNotificationCenterGetDarwinNotifyCenter() else {
+        return
+    }
+    CFNotificationCenterPostNotification(center,
+                                         kNotificationFailureName,
+                                         nil, // Sender. We can ignore this
+                                         nil, // Ignored by darwin notification centers
+                                         false // Ignored by darwin notification centers
+    )
+    #endif // os(iOS)
+}
+
 enum SplunkEventOffloaderError: Error {
     case invalidSplunkURL
 }
@@ -155,22 +171,30 @@ actor SplunkEventOffloader {
                     throw NSError(domain: "SplunkEventOffloader", code: 1, userInfo: [NSLocalizedFailureErrorKey:"Unexpected URL Response type"])
                 }
 
-                if httpResponse.statusCode == 200 {
+                let status = httpResponse.statusCode
+                if 200 == status {
                     return
                 } else {
                     log.error("""
-                        ERROR: Response: \(httpResponse.statusCode)
+                        ERROR: Response: \(status)
                         ERROR: \(String(decoding: data, as: UTF8.self), privacy: .public)
                         ERROR: Request body:\n\(String(decoding: request.httpBody ?? Data(), as: UTF8.self), privacy: .private)
                         """)
                     // Retries won't help with Splunk errors, so force the loop to break
                     attempts = maxRetries
                     Statistics.shared.splunkErrors += 1
+
+                    // Splunkloggingd can't emit metrics due to layering issues. For now, emit a darwin notification.
+                    // A daemon in the support cryptex consumes and re-emits as a metric so we can monitor for failures
+                    postFailureNotification()
                 }
             } catch {
                 log.error("Splunk HTTP POST failed:\n\(error.localizedDescription, privacy: .public)")
                 Statistics.shared.httpErrors += 1
                 attempts += 1
+
+                // See above for why we need to emit this
+                postFailureNotification()
             }
         }
     }

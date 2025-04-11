@@ -35,39 +35,60 @@ public struct WorkloadProperties: Codable, CustomStringConvertible, Sendable {
 
 // Message for Ropes/ServiceDiscovery
 public struct WorkloadConfig: Codable, CustomStringConvertible, Sendable {
+    public enum RoutingTagValue: Codable, CustomStringConvertible, Sendable, Equatable, Hashable {
+        case string(String)
+        case stringList([String])
+
+        public var description: String {
+            switch self {
+            case .string(let stringValue):
+                return stringValue
+            case .stringList(let stringValues):
+                return "[" + stringValues.joined(separator: ", ") + "]"
+            }
+        }
+    }
+
     public var maxBatchSize: Int
     public var optimalBatchSize: Int
     public var currentBatchSize: Int
 
-    @available(*, deprecated, renamed: "routingTags")
-    public var tags: [String: String] {
+    @available(*, deprecated, renamed: "workloadTags")
+    public var routingTags: [String: [String]] {
         get {
-            self._tags.mapValues { $0.first ?? "" }
+            self._tags.mapValues { value in
+                switch value {
+                case .string(let string):
+                    return [string]
+                case .stringList(let stringList):
+                    return stringList
+                }
+            }
         }
         set {
-            self._tags = newValue.mapValues { [$0] }
+            self._tags = newValue.mapValues { .stringList($0) }
         }
     }
 
-    public var routingTags: [String: [String]] {
+    public var workloadTags: [String: RoutingTagValue] {
         get {
-            self._tags
+            return self._tags
         }
         set {
             self._tags = newValue
         }
     }
 
-    private var _tags: [String: [String]]
+    private var _tags: [String: RoutingTagValue]
 
-    @available(*, deprecated, renamed: "init(maxBatchSize:optimalBatchSize:currentBatchSize:tags:)")
+    @available(*, deprecated, renamed: "init(maxBatchSize:optimalBatchSize:currentBatchSize:workloadTags:)")
     public init(
         maxBatchSize: Int,
         optimalBatchSize: Int,
         currentBatchSize: Int,
-        tags: [String: String]
+        routingTags: [String: [String]]
     ) {
-        self._tags = tags.mapValues { [$0] }
+        self._tags = routingTags.mapValues { .stringList($0) }
         self.maxBatchSize = maxBatchSize
         self.optimalBatchSize = optimalBatchSize
         self.currentBatchSize = currentBatchSize
@@ -77,9 +98,9 @@ public struct WorkloadConfig: Codable, CustomStringConvertible, Sendable {
         maxBatchSize: Int,
         optimalBatchSize: Int,
         currentBatchSize: Int,
-        routingTags: [String: [String]]
+        workloadTags: [String: RoutingTagValue]
     ) {
-        self._tags = routingTags
+        self._tags = workloadTags
         self.maxBatchSize = maxBatchSize
         self.optimalBatchSize = optimalBatchSize
         self.currentBatchSize = currentBatchSize
@@ -91,7 +112,7 @@ public struct WorkloadConfig: Codable, CustomStringConvertible, Sendable {
         maxBatchSize: \(self.maxBatchSize), \
         optimalBatchSize: \(self.optimalBatchSize), \
         currentBatchSize: \(self.currentBatchSize), \
-        routingTags: \(self._tags))
+        workloadTags: \(self._tags))
         """
     }
 }
@@ -136,11 +157,12 @@ public struct WorkloadControllerStatus: Codable, CustomStringConvertible, Sendab
     }
 }
 
-public protocol CloudBoardControllerAPIClientToServerProtocol: AnyActor, Sendable {
+public protocol CloudBoardControllerAPIClientToServerProtocol: Actor {
     func registerWorkload(
         config: WorkloadConfig, properties: WorkloadProperties
     ) async throws
     func updateHealthStatus(status: WorkloadControllerStatus) async throws
+    func restartPrewarmedInstances() async throws
 }
 
 public protocol CloudBoardControllerAPIClientDelegateProtocol:

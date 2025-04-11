@@ -27,173 +27,164 @@ import Network
 // There is no way to test this easily, and one way to rely on TIE team to test this for us.
 // Now with the client server, we get the tlsOptions from ensembled and use Network Framework APIs
 // to establish mtls communication between server and client.
-// To use it, run esenmblectl run-server <port> on a node, and on other node/nodes, run ensemblectl run-client <port> <server>
+// To use it, run esenmblectl run-server <port> on a node, and on other node/nodes, run ensemblectl
+// run-client <port> <server>
 class ServerConnection {
-    //The TCP maximum package size is 64K 65536
-    let MTU = 65536
+	// The TCP maximum package size is 64K 65536
+	let MTU = 65536
 
-    private static var nextID: Int = 0
-    let  connection: NWConnection
-    let id: Int
+	private static var nextID: Int = 0
+	let connection: NWConnection
+	let id: Int
 
-    init(nwConnection: NWConnection) {
-        connection = nwConnection
-        id = ServerConnection.nextID
-        ServerConnection.nextID += 1
-    }
+	init(nwConnection: NWConnection) {
+		self.connection = nwConnection
+		self.id = ServerConnection.nextID
+		ServerConnection.nextID += 1
+	}
 
-    var didStopCallback: ((Error?) -> Void)? = nil
+	var didStopCallback: ((Error?) -> Void)?
 
-    func start() {
-        print("connection \(id) will start")
-        connection.stateUpdateHandler = self.stateDidChange(to:)
-        setupReceive()
-        connection.start(queue: .main)
-    }
+	func start() {
+		print("connection \(self.id) will start")
+		self.connection.stateUpdateHandler = self.stateDidChange(to:)
+		self.setupReceive()
+		self.connection.start(queue: .main)
+	}
 
-    private func stateDidChange(to state: NWConnection.State) {
-        switch state {
-        case .waiting(let error):
-            connectionDidFail(error: error)
-        case .ready:
-            print("connection \(id) ready")
-        case .failed(let error):
-            connectionDidFail(error: error)
-        default:
-            break
-        }
-    }
+	private func stateDidChange(to state: NWConnection.State) {
+		switch state {
+		case .waiting(let error):
+			self.connectionDidFail(error: error)
+		case .ready:
+			print("connection \(self.id) ready")
+		case .failed(let error):
+			self.connectionDidFail(error: error)
+		default:
+			break
+		}
+	}
 
-    private func setupReceive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: MTU) { (data, _, isComplete, error) in
-            if let data = data, !data.isEmpty {
-                let message = String(data: data, encoding: .utf8)
-                print("connection \(self.id) did receive, data: \(data as NSData) string: \(message ?? "-")")
-                self.send(data: data)
-            }
-            if isComplete {
-                self.connectionDidEnd()
-            } else if let error = error {
-                self.connectionDidFail(error: error)
-            } else {
-                self.setupReceive()
-            }
-        }
-    }
+	private func setupReceive() {
+		self.connection
+			.receive(minimumIncompleteLength: 1, maximumLength: self.MTU) { data, _, isComplete, error in
+				if let data, !data.isEmpty {
+					let message = String(data: data, encoding: .utf8)
+					print("connection \(self.id) did receive, data: \(data as NSData) string: \(message ?? "-")")
+					self.send(data: data)
+				}
+				if isComplete {
+					self.connectionDidEnd()
+				} else if let error {
+					self.connectionDidFail(error: error)
+				} else {
+					self.setupReceive()
+				}
+			}
+	}
 
+	func send(data: Data) {
+		self.connection.send(content: data, completion: .contentProcessed { error in
+			if let error {
+				self.connectionDidFail(error: error)
+				return
+			}
+			print("connection \(self.id) did send, data: \(data as NSData)")
+		})
+	}
 
-    func send(data: Data) {
-        self.connection.send(content: data, completion: .contentProcessed( { error in
-            if let error = error {
-                self.connectionDidFail(error: error)
-                return
-            }
-            print("connection \(self.id) did send, data: \(data as NSData)")
-        }))
-    }
+	func stop() {
+		print("connection \(self.id) will stop")
+	}
 
-    func stop() {
-        print("connection \(id) will stop")
-    }
+	private func connectionDidFail(error: Error) {
+		print("connection \(self.id) did fail, error: \(error)")
+		self.stop(error: error)
+	}
 
+	private func connectionDidEnd() {
+		print("connection \(self.id) did end")
+		self.stop(error: nil)
+	}
 
-
-    private func connectionDidFail(error: Error) {
-        print("connection \(id) did fail, error: \(error)")
-        stop(error: error)
-    }
-
-    private func connectionDidEnd() {
-        print("connection \(id) did end")
-        stop(error: nil)
-    }
-
-    private func stop(error: Error?) {
-        connection.stateUpdateHandler = nil
-        connection.cancel()
-        if let didStopCallback = didStopCallback {
-            self.didStopCallback = nil
-            didStopCallback(error)
-        }
-    }
+	private func stop(error: Error?) {
+		self.connection.stateUpdateHandler = nil
+		self.connection.cancel()
+		if let didStopCallback {
+			self.didStopCallback = nil
+			didStopCallback(error)
+		}
+	}
 }
 
 class Server {
-    let port: NWEndpoint.Port
-    let listener: NWListener
-    
-    private var connectionsByID: [Int: ServerConnection] = [:]
-    
-    init(port: UInt16, tlsOptions: NWProtocolTLS.Options) {
-        self.port = NWEndpoint.Port(rawValue: port)!
-        
-        let tcpOptions = NWProtocolTCP.Options()
-        tcpOptions.enableKeepalive = true
-        tcpOptions.keepaliveIdle = 2
-        
+	let port: NWEndpoint.Port
+	let listener: NWListener
 
-        
-        // Create parameters with custom TLS and TCP options.
-        let parameters = NWParameters(tls: tlsOptions, tcp: tcpOptions)
-        parameters.allowLocalEndpointReuse = true
-        listener = try! NWListener(using: parameters, on: self.port)
-    }
-    
-    func start() throws {
-        print("Server starting...")
-        listener.stateUpdateHandler = self.stateDidChange(to:)
-        listener.newConnectionHandler = self.didAccept(nwConnection:)
-        listener.start(queue: .main)
-    }
-    
-    func stateDidChange(to newState: NWListener.State) {
-        switch newState {
-        case .ready:
-          print("Server ready.")
-        case .failed(let error):
-            print("Server failure, error: \(error.localizedDescription)")
-            exit(EXIT_FAILURE)
-        default:
-            break
-        }
-    }
-    
-    private func didAccept(nwConnection: NWConnection) {
-        let connection = ServerConnection(nwConnection: nwConnection)
-        self.connectionsByID[connection.id] = connection
-        connection.didStopCallback = { _ in
-            self.connectionDidStop(connection)
-        }
-        connection.start()
-        connection.send(data: "connection to a client established: \(connection.id)".data(using: .utf8)!)
-        print("server did open connection \(connection.id)")
-    }
-    
-    private func connectionDidStop(_ connection: ServerConnection) {
-        self.connectionsByID.removeValue(forKey: connection.id)
-        print("server did close connection \(connection.id)")
-    }
-    
-    private func stop() {
-        self.listener.stateUpdateHandler = nil
-        self.listener.newConnectionHandler = nil
-        self.listener.cancel()
-        for connection in self.connectionsByID.values {
-            connection.didStopCallback = nil
-            connection.stop()
-        }
-        self.connectionsByID.removeAll()
-    }
-    
+	private var connectionsByID: [Int: ServerConnection] = [:]
+
+	init(port: UInt16, tlsOptions: NWProtocolTLS.Options) {
+		self.port = NWEndpoint.Port(rawValue: port)!
+
+		let tcpOptions = NWProtocolTCP.Options()
+		tcpOptions.enableKeepalive = true
+		tcpOptions.keepaliveIdle = 2
+
+		// Create parameters with custom TLS and TCP options.
+		let parameters = NWParameters(tls: tlsOptions, tcp: tcpOptions)
+		parameters.allowLocalEndpointReuse = true
+		self.listener = try! NWListener(using: parameters, on: self.port)
+	}
+
+	func start() throws {
+		print("Server starting...")
+		self.listener.stateUpdateHandler = self.stateDidChange(to:)
+		self.listener.newConnectionHandler = self.didAccept(nwConnection:)
+		self.listener.start(queue: .main)
+	}
+
+	func stateDidChange(to newState: NWListener.State) {
+		switch newState {
+		case .ready:
+			print("Server ready.")
+		case .failed(let error):
+			print("Server failure, error: \(error.localizedDescription)")
+			exit(EXIT_FAILURE)
+		default:
+			break
+		}
+	}
+
+	private func didAccept(nwConnection: NWConnection) {
+		let connection = ServerConnection(nwConnection: nwConnection)
+		self.connectionsByID[connection.id] = connection
+		connection.didStopCallback = { _ in
+			self.connectionDidStop(connection)
+		}
+		connection.start()
+		connection.send(data: "connection to a client established: \(connection.id)".data(using: .utf8)!)
+		print("server did open connection \(connection.id)")
+	}
+
+	private func connectionDidStop(_ connection: ServerConnection) {
+		self.connectionsByID.removeValue(forKey: connection.id)
+		print("server did close connection \(connection.id)")
+	}
+
+	private func stop() {
+		self.listener.stateUpdateHandler = nil
+		self.listener.newConnectionHandler = nil
+		self.listener.cancel()
+		for connection in self.connectionsByID.values {
+			connection.didStopCallback = nil
+			connection.stop()
+		}
+		self.connectionsByID.removeAll()
+	}
 }
 
 public func runServer(port: UInt16, tlsOptions: NWProtocolTLS.Options) {
-    let server = Server(port: port, tlsOptions:tlsOptions)
-    try! server.start()
-    RunLoop.current.run()
+	let server = Server(port: port, tlsOptions: tlsOptions)
+	try! server.start()
+	RunLoop.current.run()
 }
-
-
-
-
-

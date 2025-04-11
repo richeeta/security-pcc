@@ -84,6 +84,7 @@ CloudBoardAttestationAPIClientDelegateProtocol {
     var responseEncapsulator: OHTTPEncapsulation.StreamingResponse?
     var ohttpStateMachine = OHTTPServerStateMachine()
     var requestTrackingID: String = ""
+    private var abandoned: Bool = false
 
     init(
         attestationClient: CloudBoardAttestationAPIClientProtocol?,
@@ -109,7 +110,7 @@ CloudBoardAttestationAPIClientDelegateProtocol {
         }
     }
 
-    public func invokeWorkloadRequest(_ request: InvokeWorkloadRequest) async throws {
+    public func invokeWorkloadRequest(_ request: CloudBoardDaemonToJobHelperMessage) async throws {
         do {
             self.metrics.emit(Metrics.Messenger.TotalRequestsReceivedCounter(action: .increment))
             switch request {
@@ -151,7 +152,7 @@ CloudBoardAttestationAPIClientDelegateProtocol {
                 message: "invokeWorkloadRequest error",
                 error: error
             ).log(to: Self.logger, level: .error)
-            try await self.server.sendWorkloadResponse(WorkloadResponse.failureReport(error.reason))
+            try await self.server.sendWorkloadResponse(.failureReport(error.reason))
             throw error.wrappedError
         } catch {
             CloudBoardMessengerCheckpoint(
@@ -211,6 +212,15 @@ CloudBoardAttestationAPIClientDelegateProtocol {
 
     func teardown() async throws {
         self.encodedRequestContinuation.yield(.teardown)
+    }
+
+    func abandon() async throws {
+        CloudBoardMessengerCheckpoint(
+            logMetadata: self.logMetadata(),
+            message: "Received request to abandon job"
+        ).log(to: Self.logger, level: .default)
+        self.abandoned = true
+        self.encodedRequestContinuation.yield(.abandon)
     }
 
     public func run() async throws {
@@ -293,7 +303,7 @@ CloudBoardAttestationAPIClientDelegateProtocol {
             // Finish the request stream once the response stream has ended.
             self.encodedRequestContinuation.finish()
 
-            if !receivedFinal {
+            if !receivedFinal, !self.abandoned {
                 CloudBoardMessengerCheckpoint(
                     logMetadata: self.logMetadata(),
                     message: "Encoded response stream finished without final response chunk"
@@ -384,8 +394,8 @@ struct CloudBoardMessengerCheckpoint: RequestCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
-        remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
         service.name=\(self.serviceName, privacy: .public)
@@ -403,7 +413,7 @@ struct CloudBoardMessengerCheckpoint: RequestCheckpoint {
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
         remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
         service.name=\(self.serviceName, privacy: .public)
@@ -422,8 +432,8 @@ struct CloudBoardMessengerCheckpoint: RequestCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
-        remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
         service.name=\(self.serviceName, privacy: .public)
@@ -442,8 +452,8 @@ struct CloudBoardMessengerCheckpoint: RequestCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
-        remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
         service.name=\(self.serviceName, privacy: .public)
@@ -461,8 +471,8 @@ struct CloudBoardMessengerCheckpoint: RequestCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
-        remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
         service.name=\(self.serviceName, privacy: .public)

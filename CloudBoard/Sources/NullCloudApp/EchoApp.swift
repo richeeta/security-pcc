@@ -22,7 +22,7 @@ struct EchoApp {
         let requestID = environment.plaintextMetadata.requestID
         for try await data in input {
             NullCloudApp.log.log("""
-            requestId=\(requestID, privacy: .public)
+            request.uuid=\(requestID, privacy: .public)
             message=NullCloudApp echo received: \(data.count) bytes
             """)
             try await responder.write(data)

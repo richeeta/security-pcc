@@ -16,13 +16,13 @@
 import CloudBoardAttestationDAPI
 import Foundation
 
-protocol AttestationProvider {
+protocol AttestationProvider: Sendable {
     /// Create key and attest it with the provided expiry encoded in the attestation bundle
     func createAttestedKey(attestationBundleExpiry: Date) async throws -> InternalAttestedKey
 }
 
 struct InternalAttestedKey: Sendable {
-    public enum KeyType {
+    public enum KeyType: Sendable {
         /// Supported for testing purposes only for non-SEP keys
         case direct(privateKey: Data)
         case sepKey(secKey: SecKey)

@@ -24,8 +24,8 @@ import PrivateCloudCompute
 import Synchronization
 
 final class TrustedRequestXPCProxy {
-    private let logger = tc2Logger(forCategory: .TrustedRequestXPCProxy)
-    let requestID: UUID
+    private let logger = tc2Logger(forCategory: .trustedRequestXPCProxy)
+    let logPrefix: String
 
     let outgoingUserDataWriter: OutgoingUserDataWriter
 
@@ -43,7 +43,7 @@ final class TrustedRequestXPCProxy {
         self.outgoingUserDataWriter = outgoingUserDataWriter
         self.incomingUserDataReader = incomingUserDataReader
         self.task = task
-        self.requestID = requestID
+        self.logPrefix = "\(requestID):"
     }
 }
 
@@ -63,21 +63,21 @@ extension TrustedRequestXPCProxy: TC2XPCTrustedRequestProtocol {
     }
 
     func cancel(completion: @escaping @Sendable () -> Void) {
-        self.logger.log("Request \(self.requestID): Cancellation received. Cancelling task!")
+        self.logger.log("\(self.logPrefix) Cancellation received. Cancelling task!")
         self.task.cancel()
         completion()
     }
 
     func next(completion: @escaping @Sendable (Data?, Data?) -> Void) {
         let (nextID, _) = self.nextCallID.add(1, ordering: .relaxed)
-        self.logger.log("Request \(self.requestID): Next call (callID: \(nextID) received")
+        self.logger.log("\(self.logPrefix) Next call (callID: \(nextID) received")
         Task {
             do {
                 let data = try await self._next()
-                self.logger.log("Request \(self.requestID): Next call (callID: \(nextID)) returned. Bytes: \(data?.count ?? -1)")
+                self.logger.log("\(self.logPrefix) Next call (callID: \(nextID)) returned. Bytes: \(data?.count ?? -1)")
                 completion(data, nil)
             } catch let error as TrustedCloudComputeError {
-                self.logger.log("Request \(self.requestID): Next call (callID: \(nextID)) failed. Error: \(error)")
+                self.logger.error("\(self.logPrefix) Next call (callID: \(nextID)) failed. Error: \(error)")
                 completion(nil, error.json)
             } catch {
                 // Note, _next throws(TrustedCloudComputeError)

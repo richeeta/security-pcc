@@ -19,8 +19,6 @@ import Foundation
 import Virtualization
 import Virtualization_Private
 
-private let defaultBootArgs = "debug=0x014e serial=0xb" // nvram "boot-args" if none specified during create
-
 extension VM {
     // VM.Config is our in-core representation of a Virtual Machine (ideally would use the
     //  VZVirtualMachineConfiguration serializer, but it's not a stable interface)
@@ -36,7 +34,8 @@ extension VM {
         var machineIDBlob: Data? // opaque represenation of ECID
 
         var ecid: UInt64 {
-            if let vmConfig = try? vzConfig(),
+            if let _ = machineIDBlob, // only stable once using config written to disk
+               let vmConfig = try? vzConfig(),
                let pconf = vmConfig.platform as? VZMacPlatformConfiguration
             {
                 return pconf.machineIdentifier._ECID
@@ -133,18 +132,6 @@ extension VM {
             consoleInput: FileHandle? = FileHandle.standardInput,
             consoleOutput: FileHandle? = FileHandle.standardOutput
         ) throws -> VZVirtualMachineConfiguration {
-            let auxStorage: VZMacAuxiliaryStorage
-            do {
-                if FileManager.isRegularFile(bundle.auxiliaryStoragePath) {
-                    auxStorage = VZMacAuxiliaryStorage(url: bundle.auxiliaryStoragePath)
-                } else {
-                    auxStorage = try vzCreateAuxStorage(bundle: bundle, platformType: platformType)
-                    try auxStorage._setValue(defaultBootArgs, forNVRAMVariableNamed: "boot-args")
-                }
-            } catch {
-                throw VMError("\(bundle.auxiliaryStoragePath.path): \(error)")
-            }
-
             // initial VM configuration for platformType
             let avpsepbooter: URL? = if let img = romImages?.avpsepbooter { bundle.qualifyPath(img) } else { nil }
             let config: VZVirtualMachineConfiguration
@@ -166,6 +153,15 @@ extension VM {
                 bootloader_config._romURL = bundle.qualifyPath(avpbooter)
             }
             config.bootLoader = bootloader_config
+
+            // (iBoot) auxiliaryStorage
+            if !FileManager.isRegularFile(bundle.auxiliaryStoragePath) {
+                do {
+                    let _ = try vzCreateAuxStorage(bundle: bundle, platformType: platformType)
+                } catch {
+                    throw VMError("\(bundle.auxiliaryStoragePath.path): \(error)")
+                }
+            }
 
             do {
                 let storage_attachment = try VZDiskImageStorageDeviceAttachment(

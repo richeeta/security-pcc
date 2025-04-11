@@ -176,7 +176,7 @@ public struct CloudBoardDConfiguration: Codable, Hashable, Sendable {
 
         // gRPC
         if self.grpc != nil {
-            guard self.grpc!.expectedPeerAPRN != nil else {
+            guard let expectedPeerAPRNs = self.grpc?.expectedPeerAPRNs, !expectedPeerAPRNs.isEmpty else {
                 logger.error("Missing GRPC peer APRN")
                 throw CloudBoardDConfigurationError.missingGRPCPeerAPRN
             }
@@ -375,6 +375,7 @@ extension CloudBoardDConfiguration {
             case listeningIP = "ListeningIP"
             case listeningPort = "ListeningPort"
             case expectedPeerAPRN = "ExpectedPeerAPRN"
+            case expectedPeerAPRNs = "ExpectedPeerAPRNs"
             case keepalive = "Keepalive"
             case _useSelfSignedCertificate = "UseSelfSignedCertificate"
         }
@@ -387,7 +388,15 @@ extension CloudBoardDConfiguration {
         public var listeningPort: Int?
         /// The APRN of the peer that the server should expect. If not provided, the server will not validate the
         /// client's identity
+        ///
+        /// DEPRECATED: Use ``expectedPeerAPRNs`` instead
         public var expectedPeerAPRN: String?
+
+        /// List of candidate APRNs of the peer that the server should expect. If not provided, the server will not
+        /// validate the client's identity. Otherwise the server validates that the peer certificate contains at least
+        /// one of the provided APRNs.
+        public var expectedPeerAPRNs: [String]?
+
         /// Keepalive configuration for the GRPC server
         public var keepalive: Keepalive?
 
@@ -397,13 +406,13 @@ extension CloudBoardDConfiguration {
             listeningIP: String? = nil,
             listeningPort: Int? = nil,
             useSelfSignedCertificate: Bool? = nil,
-            expectedPeerAPRN: String? = nil,
+            expectedPeerAPRNs: [String]? = nil,
             keepAlive: Keepalive? = nil
         ) {
             self.listeningIP = listeningIP
             self.listeningPort = listeningPort
             self._useSelfSignedCertificate = useSelfSignedCertificate
-            self.expectedPeerAPRN = expectedPeerAPRN
+            self.expectedPeerAPRNs = expectedPeerAPRNs
             self.keepalive = keepAlive
         }
 
@@ -420,6 +429,7 @@ extension CloudBoardDConfiguration {
             listeningIP: \(String(describing: self.listeningIP)), \
             listeningPort: \(String(describing: self.listeningPort)), \
             useSelfSignedCertificate: \(self.useSelfSignedCertificate), \
+            expectedPeerAPRNs: \(self.expectedPeerAPRNs.map { $0.joined(separator: ", ") } ?? "nil")
             keepalive: \(String(describing: self.keepalive))
             )
             """
@@ -435,6 +445,7 @@ extension CloudBoardDConfiguration {
         private var _httpRequestTimeout: TimeInterval?
         private var _tickInterval: TimeInterval?
         private var _maximumToleranceRatio: Double?
+        private var _additionalProperties: [String: String]?
 
         init(
             serviceURL: URL,
@@ -444,7 +455,8 @@ extension CloudBoardDConfiguration {
             retryDelay: TimeInterval? = nil,
             httpRequestTimeout: TimeInterval? = nil,
             tickInterval: TimeInterval? = nil,
-            maximumToleranceRatio: Double? = nil
+            maximumToleranceRatio: Double? = nil,
+            additionalProperties: [String: String]? = nil
         ) {
             self._serviceURL = serviceURL
             self._allowInsecure = allowInsecure
@@ -454,6 +466,7 @@ extension CloudBoardDConfiguration {
             self._httpRequestTimeout = httpRequestTimeout
             self._tickInterval = tickInterval
             self._maximumToleranceRatio = maximumToleranceRatio
+            self._additionalProperties = additionalProperties
         }
 
         enum CodingKeys: String, CodingKey {
@@ -465,6 +478,7 @@ extension CloudBoardDConfiguration {
             case _httpRequestTimeout = "HTTPRequestTimeout"
             case _tickInterval = "TickInterval"
             case _maximumToleranceRatio = "MaximumToleranceRatio"
+            case _additionalProperties = "AdditionalProperties"
         }
 
         /// Heartbeat service endpoint URL
@@ -507,6 +521,10 @@ extension CloudBoardDConfiguration {
         /// Used to determine the jitter to add to tick interval
         public var maximumToleranceRatio: Double {
             self._maximumToleranceRatio ?? 0.25
+        }
+
+        public var additionalProperties: [String: String]? {
+            self._additionalProperties
         }
     }
 }

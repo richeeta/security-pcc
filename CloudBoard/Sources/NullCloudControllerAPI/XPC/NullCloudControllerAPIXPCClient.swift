@@ -32,4 +32,10 @@ extension NullCloudControllerAPIXPCClient: NullCloudControllerAPIClientToServerP
             NullCloudControllerAPIXPCClientToServerMessages.UpdateState(state: state)
         )
     }
+
+    public func restartPrewarmedInstances() async throws {
+        return try await self.connection.send(
+            NullCloudControllerAPIXPCClientToServerMessages.RestartPrewarmedInstances()
+        )
+    }
 }

@@ -32,6 +32,21 @@ extension CLI {
                 transform: { try validateVMName($0) })
         var vmName: String = cmdDefaults.vmName
 
+        @Option(name: [.customLong("kernelcache"), .customShort("K")],
+                help: "Path to Kernelcache override for guest.",
+                transform: { try validateFilePath($0) })
+        var kernelCache: String?
+
+        @Option(name: [.customLong("sptm"), .customShort("S")],
+                help: "Path to SPTM override for guest.",
+                transform: { try validateFilePath($0) })
+        var sptm: String?
+
+        @Option(name: [.customLong("txm"), .customShort("M")],
+                help: "Path to TXM override for guest.",
+                transform: { try validateFilePath($0) })
+        var txm: String?
+
         @Option(name: [.customLong("variant")],
                 help: "Specify OS restore image variant.",
                 transform: { try validateOSVariant($0) })
@@ -76,7 +91,10 @@ extension CLI {
             }
 
             let restoreOptions = VM.RestoreOptions(restoreImage: restoreImage,
-                                                   restoreVariant: restoreVariantName!)
+                                                   restoreVariant: restoreVariantName!,
+                                                   kernelcacheOverride: kernelCache,
+                                                   sptmOverride: sptm,
+                                                   txmOverride: txm)
             do {
                 try await vm.restore(restoreOptions)
             } catch {

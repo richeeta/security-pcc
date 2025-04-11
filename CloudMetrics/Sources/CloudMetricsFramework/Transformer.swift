@@ -19,6 +19,7 @@
 //  Created by Marco Magdy on 8/22/23.
 //
 
+internal import CloudMetricsConstants
 import Foundation
 import os
 import PrometheusParser
@@ -32,7 +33,7 @@ extension Double {
     }
 }
 
-private var logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "PrometheusTransformer")
+private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "PrometheusTransformer")
 
 // swiftlint:disable cyclomatic_complexity
 // swiftlint:disable function_body_length
@@ -58,14 +59,14 @@ private func publishPrometheusBlocks(block: PromMetricBlock) {
             let counter = FloatingPointCounter(label: currentCounter.name, dimensions: dims)
             counter.reset(value: currentCounter.value)
         }
-        logger.debug("Published \(promCounters.count) counters to cloudmetrics")
+        logger.info("Published \(promCounters.count) counters to cloudmetrics")
     case let .gauge(promGauges):
         for currentGauge in promGauges {
             let dims = extractDimensions(labels: currentGauge.labels)
             let gauge = Gauge(label: currentGauge.name, dimensions: dims)
             gauge.record(currentGauge.value)
         }
-        logger.debug("Published \(promGauges.count) gauges to cloudmetrics")
+        logger.info("Published \(promGauges.count) gauges to cloudmetrics")
     case let .histogram(promHistogram):
         guard promHistogram.buckets.first != nil else {
             // Histogram should always have at least 1 bucket
@@ -102,13 +103,13 @@ private func publishPrometheusBlocks(block: PromMetricBlock) {
         let summary = try? Summary(label: promSummary.name,
                                    dimensions: quantiles.dimensions,
                                    quantiles: quantiles.names)
-        logger.debug("Summary has count as \(promSummary.count.value) and sum as \(promSummary.sum.value)")
+        logger.info("Summary has count as \(promSummary.count.value) and sum as \(promSummary.sum.value)")
         guard let count = promSummary.count.value.toSafeInt() else {
             logger.error("Summary \(promSummary.name) has a count that is not a valid Swift Int.")
             break
         }
         summary?.record(quantileValues: quantiles.values, sum: promSummary.sum.value, count: count)
-        logger.debug("Published summary with \(quantiles.values.count) quantiles.")
+        logger.info("Published summary with \(quantiles.values.count) quantiles.")
     @unknown default:
         fatalError("Unknown type of prometheus block")
     }

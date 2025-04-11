@@ -244,7 +244,7 @@ extension Histogram where DimensionKey == NoDimensionKeys {
     public var dimensions: MetricDimensions<DimensionKey> { [:] }
 }
 
-public protocol CounterFactory<Input> {
+public protocol CounterFactory<Input>: Sendable {
     associatedtype Input
     associatedtype Counter: CloudBoardMetrics.Counter
 
@@ -258,7 +258,7 @@ public protocol GaugeFactory<Input> {
     func make(_ input: Input) -> Gauge
 }
 
-public protocol HistogramFactory<Input> {
+public protocol HistogramFactory<Input>: Sendable {
     associatedtype Input
     associatedtype Histogram: CloudBoardMetrics.Histogram
 

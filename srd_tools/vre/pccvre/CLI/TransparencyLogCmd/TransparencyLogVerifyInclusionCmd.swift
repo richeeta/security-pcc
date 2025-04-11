@@ -80,11 +80,11 @@ extension CLI.TransparencyLogCmd {
                 }
                 let request = report.privateCloudComputeRequests[requestIndex]
 
-                guard request.attestations.indices.contains(attestationIndex) else {
+                guard request.nodes.indices.contains(attestationIndex) else {
                     throw CLIError("attestation index \(attestationIndex) out of bounds")
                 }
 
-                attestationBundle = try AttestationBundle(jsonString: request.attestations[attestationIndex].attestationString)
+                attestationBundle = try AttestationBundle(jsonString: request.nodes[attestationIndex].attestationBundle)
             }
 
             let storageURL = URL(filePath: storage).appending(path: transparencyLogOptions.environment.rawValue)
@@ -175,13 +175,13 @@ extension AppleIntelligenceReport {
         var requestId: String
         var pipelineKind: String
         var pipelineParameters: String
-        var attestations: [Attestation]
+        var nodes: [Node]
     }
 
-    struct Attestation: Codable {
+    struct Node: Codable {
         var node: String
         var nodeState: String
-        var attestationString: String
+        var attestationBundle: String
     }
 }
 

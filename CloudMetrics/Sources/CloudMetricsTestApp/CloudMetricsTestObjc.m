@@ -23,7 +23,7 @@
 #import <CloudMetricsFramework/CloudMetricsFramework.h>
 
 int main (int argc, char **argv) {
-    [CloudMetricsModule bootstrapWithClientName:@"cloudmetrics_test"];
+    [CloudMetricsModule bootstrap];
 
     NSDictionary<NSString *, NSString *> *testDimensions = @{ @"dim1": @"val1" };
     CMCounter *counter = [[CMCounter alloc] initWithName:@"TestCounter" dimensions:testDimensions];

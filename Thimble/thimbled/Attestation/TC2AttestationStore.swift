@@ -67,7 +67,7 @@ protocol TC2AttestationStoreProtocol: Sendable {
     ) async -> [String: Data]
 }
 
-private let logger = tc2Logger(forCategory: .AttestationStore)
+private let logger = tc2Logger(forCategory: .attestationStore)
 
 typealias TC2ParamsStoreEntry = TC2AttestationStoreMigrationPlan.TC2AttestationStoreSchema_v1.TC2ParamsStoreEntry
 typealias TC2NodeStoreEntry = TC2AttestationStoreMigrationPlan.TC2AttestationStoreSchema_v1.TCNodeStoreEntry
@@ -171,7 +171,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
         let storesDir = Self.storesDir(rootDir: dir, environment: environment)
 
         let storeFileURL = storesDir.appendingPathComponent("attestation_store_v0.2.sqlite", isDirectory: false)
-        logger.log("\(#function): attestation store path: \(storeFileURL)")
+        logger.log("attestation store path: \(storeFileURL)")
         let configuration = ModelConfiguration(url: storeFileURL)
         guard let currentVersionedSchema = TC2AttestationStoreMigrationPlan.schemas.last else {
             logger.error("failed to init attestation store, missing schema")
@@ -187,6 +187,14 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
         }
     }
 
+    static func migrate(from source: URL, to destination: URL) {
+        // We're only going to migrate a production attestation store.
+        // Unfortunately we do not yet know, at migration, which env we're in.
+        let sourceFile = storesDir(rootDir: source, environment: .production)
+        let destinationFile = storesDir(rootDir: destination, environment: .production)
+        moveDaemonStateFile(from: sourceFile, to: destinationFile)
+    }
+
     private static func storesDir(rootDir: URL, environment: TC2Environment) -> URL {
         let dirName = "Stores_\(environment.name)"
         return rootDir.appendingPathComponent(dirName, isDirectory: true)
@@ -200,7 +208,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
         batch: UInt,
         fetchTime: Date
     ) -> Bool {
-        logger.log("\(#function): adding entry for node: \(validatedAttestation.attestation.nodeID) batch: \(batch) prefetched: \(prefetched) fetchTime: \(fetchTime)")
+        logger.log("saveValidatedAttestation: \(validatedAttestation.attestation.nodeID) batch: \(batch) prefetched: \(prefetched) fetchTime: \(fetchTime)")
 
         guard let uniqueNodeIdentifier = validatedAttestation.uniqueNodeIdentifier else {
             logger.error("missing validatedAttestation.uniqueNodeIdentifier")
@@ -236,7 +244,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
             }
         } else {
             // Create a new tracking entry for this set of parameters
-            logger.log("\(#function): Linking \(uniqueNodeIdentifier) to ...")
+            logger.log("Linking \(uniqueNodeIdentifier) to ...")
             createNewParamsEntry(
                 parameters: parameters,
                 withNode: uniqueNodeIdentifier,
@@ -288,7 +296,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
         serverRequestID: UUID,
         maxAttestations: Int
     ) -> [String: ValidatedAttestation] {
-        logger.log("\(#function) id: \(serverRequestID)")
+        logger.log("getAttestationsForRequest id: \(serverRequestID)")
 
         let today = Date()
         let (pipelineKind, model, adapter) = TC2PrefetchParameters().prefetchStoreKeys(prefetchParameters: parameters)
@@ -343,7 +351,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
     }
 
     public func deleteEntriesWithExpiredAttestationBundles() {
-        logger.log("\(#function)")
+        logger.log("deleteEntriesWithExpiredAttestationBundles")
 
         // This will just delete the node entries from the NodeStore
         // Parameter store may have stale entries, but that should be ok since there will be no underlying node
@@ -365,7 +373,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
         batchId: UInt
     ) {
         let (pipelineKind, model, adapter) = TC2PrefetchParameters().prefetchStoreKeys(prefetchParameters: parameters)
-        logger.log("\(#function): pipelineKind: \(pipelineKind), model: \(model), adapter: \(adapter), batchId: \(batchId)")
+        logger.log("deleteEntries: pipelineKind: \(pipelineKind), model: \(model), adapter: \(adapter), batchId: \(batchId)")
 
         let queryPredicate = #Predicate<TC2ParamsStoreEntry> { entry in
             entry.pipelineKind == pipelineKind && entry.model == model && entry.adapter == adapter && entry.batchId == batchId
@@ -379,7 +387,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
     }
 
     public func deleteAllAttestationStoreEntries() {
-        logger.log("\(#function)")
+        logger.log("deleteAllAttestationStoreEntries")
 
         do {
             try modelContext.delete(model: TC2NodeStoreEntry.self)
@@ -392,7 +400,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
     /// Delete a node entry by looking up the ROPES provided identifier
     /// This is called in the invoke path where ROPES may tell the client that a few attestations sent by the client are unusable
     public func deleteEntryForNode(nodeIdentifier: String) -> Bool {
-        logger.log("\(#function): \(nodeIdentifier)")
+        logger.log("deleteEntryForNode: \(nodeIdentifier)")
 
         let queryPredicate = #Predicate<TC2NodeStoreEntry> { entry in
             entry.ropesNodeIdentifier == nodeIdentifier
@@ -411,7 +419,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
     func nodeExists(
         withUniqueIdentifier uniqueIdentifier: String
     ) -> Bool {
-        logger.log("\(#function): checking if \(uniqueIdentifier) node exists")
+        logger.log("nodeExists: checking if \(uniqueIdentifier) node exists")
 
         // Return true if we have this node (unexpired) at all in our NodeStore to ensure we save on validation effort
         let today = Date()
@@ -439,7 +447,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
         batchID: UInt,
         fetchTime: Date
     ) -> Bool {
-        logger.log("\(#function): checking if \(uniqueIdentifier) node tracks params")
+        logger.log("trackNodeForParameters: checking if \(uniqueIdentifier) node tracks params")
 
         do {
             // let's ensure that the parameters cache is tracking this entry
@@ -450,7 +458,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
                     params.uniqueNodeIds.append(uniqueIdentifier)
                 } else {
                     // Create a new tracking entry for this set of parameters and batch
-                    logger.log("\(#function): Linking \(uniqueIdentifier) to ...")
+                    logger.log("Linking \(uniqueIdentifier) to ...")
                     createNewParamsEntry(
                         parameters: parameters,
                         withNode: uniqueIdentifier,
@@ -471,7 +479,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
     /// Fetches an entry for a particular parameter set - if it exists in the store
     private func fetchParamsEntry(parameters: TC2RequestParameters, batchId: UInt) -> TC2ParamsStoreEntry? {
         let (pipelineKind, model, adapter) = TC2PrefetchParameters().prefetchStoreKeys(prefetchParameters: parameters)
-        logger.log("\(#function): \(pipelineKind) \(model) \(adapter)")
+        logger.log("fetchParamsEntry: \(pipelineKind) \(model) \(adapter)")
 
         let queryPredicate = #Predicate<TC2ParamsStoreEntry> { entry in
             entry.pipelineKind == pipelineKind && entry.model == model && entry.adapter == adapter && entry.batchId == batchId
@@ -494,7 +502,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
     private func createNewParamsEntry(parameters: TC2RequestParameters, withNode: String, isPrefetched: Bool, batchId: UInt, time: Date) {
         // Create a new tracking entry for this set of parameters
         let (pipelineKind, model, adapter) = TC2PrefetchParameters().prefetchStoreKeys(prefetchParameters: parameters)
-        logger.log("\(#function): \(pipelineKind) \(model) \(adapter)")
+        logger.log("createNewParamsEntry: \(pipelineKind) \(model) \(adapter)")
 
         let newPrefetchEntry = TC2ParamsStoreEntry(
             pipelineKind: pipelineKind,
@@ -510,7 +518,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
 
     private func nodeExistsInBatch(parameters: TC2RequestParameters, uniqueIdentifer: String, batchID: UInt) -> Bool {
         let (pipelineKind, model, adapter) = TC2PrefetchParameters().prefetchStoreKeys(prefetchParameters: parameters)
-        logger.log("\(#function): \(pipelineKind) \(model) \(adapter)")
+        logger.log("nodeExistsInBatch: \(pipelineKind) \(model) \(adapter)")
 
         let queryPredicate = #Predicate<TC2ParamsStoreEntry> { entry in
             entry.pipelineKind == pipelineKind && entry.model == model && entry.adapter == adapter && entry.batchId == batchID
@@ -532,7 +540,7 @@ final actor TC2AttestationStore: TC2AttestationStoreProtocol, Sendable {
 
     func attestationsExist(forParameters: TC2RequestParameters, clientCacheSize: Int, fetchTime: Date) -> Bool {
         let (pipelineKind, model, adapter) = TC2PrefetchParameters().prefetchStoreKeys(prefetchParameters: forParameters)
-        logger.log("\(#function): pipeline: \(pipelineKind) \(model) \(adapter) clientCacheSize: \(clientCacheSize), fetchTime: \(fetchTime)")
+        logger.log("attestationsExist: pipeline: \(pipelineKind) \(model) \(adapter) clientCacheSize: \(clientCacheSize), fetchTime: \(fetchTime)")
 
         let queryPredicate = #Predicate<TC2ParamsStoreEntry> { entry in
             entry.pipelineKind == pipelineKind && entry.model == model && entry.adapter == adapter && entry.fetchTime >= fetchTime && entry.usedByTrustedRequestWithId == nil

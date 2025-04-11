@@ -14,11 +14,11 @@
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
-import MantaAsyncXPC
+internal import CloudMetricsAsyncXPC
 
-public enum CloudMetricsHealthXPCMessage {
-    public struct GetHealthState: MantaAsyncXPCMessage {
-        public typealias Success = CloudMetricsHealthState
-        public typealias Failure = CloudMetricsHealthError
+package enum CloudMetricsHealthXPCMessage {
+    package struct GetHealthState: CloudMetricsAsyncXPCMessage {
+        package typealias Success = CloudMetricsHealthState
+        package typealias Failure = CloudMetricsHealthError
     }
 }

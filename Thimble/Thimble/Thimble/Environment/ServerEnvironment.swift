@@ -22,10 +22,10 @@
 @_implementationOnly import DarwinPrivate.os.variant
 import Foundation
 
-let ErrorDomain: String = "PCCErrorDomain"
-let ErrorUnableToDetermineEnvironment: Int = 2001
+let errorDomain: String = "PCCErrorDomain"
+let errorUnableToDetermineEnvironment: Int = 2001
 
-private let logger = tc2Logger(forCategory: .Configuration)
+private let logger = tc2Logger(forCategory: .configuration)
 
 @_objcImplementation extension ServerEnvironment {
     public override init() {
@@ -47,7 +47,7 @@ private let logger = tc2Logger(forCategory: .Configuration)
         let client = TC2Client()
         let result = await client.currentEnvironment()
         if result.isEmpty {
-            throw NSError(domain: ErrorDomain, code: ErrorUnableToDetermineEnvironment)
+            throw NSError(domain: errorDomain, code: errorUnableToDetermineEnvironment)
         }
         return result
     }

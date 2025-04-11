@@ -63,18 +63,18 @@ final class CIOBackend: Backend {
 			if !ok {
 				throw EnsembleError.internalError(
 					error:
-						"""
-						Oops: meshService.setNodeId(rank: \(UInt32(configuration.node.rank)) failed.
-						"""
+					"""
+					Oops: meshService.setNodeId(rank: \(UInt32(configuration.node.rank)) failed.
+					"""
 				)
 			}
 			ok = meshService.setChassisId(configuration.node.chassisID)
 			if !ok {
 				throw EnsembleError.internalError(
 					error:
-						"""
-						Oops: meshService.setChassisId(rank: \(configuration.node.chassisID) failed.
-						"""
+					"""
+					Oops: meshService.setChassisId(rank: \(configuration.node.chassisID) failed.
+					"""
 				)
 			}
 
@@ -266,30 +266,30 @@ final class CIOBackend: Backend {
 
 	/// set the crypto key
 	func setCryptoKey(key: Data, flags: UInt32) throws {
-        if self.meshService.setCryptoKey(key, andFlags: flags) == false {
-            throw "Error setting crypto key in CIO Mesh"
-        }
+		if self.meshService.setCryptoKey(key, andFlags: flags) == false {
+			throw "Error setting crypto key in CIO Mesh"
+		}
 	}
-    
-    /// get the crypto key
-    /// This API should not be called in real code path, and can be only used on test path
-    func getCryptoKey() throws -> Data {
-        var flags: UInt32 = 0
-        guard let keyData = self.meshService.getCryptoKey(forSize: 128, andFlags: &flags ) else {
-            throw "Could not get crypto key from CIO Mesh"
-        }
-        
-        return keyData
-    }
-    
-    /// gets the number of buffers that can be allocated per Crypto Key.
-    func getMaxBuffersPerKey() throws -> UInt64 {
-        return self.meshService.getMaxBuffersPerCryptoKey()
-    }
-    
-    /// gets the number of seconds that can be used for a crypto key
-    func getMaxSecondsPerKey() throws -> UInt64 {
-        return self.meshService.getMaxSecondsPerCryptoKey()
-    }
+
+	/// get the crypto key
+	/// This API should not be called in real code path, and can be only used on test path
+	func getCryptoKey() throws -> Data {
+		var flags: UInt32 = 0
+		guard let keyData = self.meshService.getCryptoKey(forSize: 128, andFlags: &flags) else {
+			throw "Could not get crypto key from CIO Mesh"
+		}
+
+		return keyData
+	}
+
+	/// gets the number of buffers that can be allocated per Crypto Key.
+	func getMaxBuffersPerKey() throws -> UInt64 {
+		return self.meshService.getMaxBuffersPerCryptoKey()
+	}
+
+	/// gets the number of seconds that can be used for a crypto key
+	func getMaxSecondsPerKey() throws -> UInt64 {
+		return self.meshService.getMaxSecondsPerCryptoKey()
+	}
 }
 #endif

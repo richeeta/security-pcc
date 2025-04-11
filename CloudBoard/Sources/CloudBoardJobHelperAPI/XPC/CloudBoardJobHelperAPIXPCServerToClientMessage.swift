@@ -21,6 +21,6 @@ internal enum CloudBoardJobHelperAPIXPCServerToClientMessages {
         internal typealias Success = ExplicitSuccess
         internal typealias Failure = CloudBoardJobHelperAPIError
 
-        internal var response: CloudBoardJobHelperAPI.WorkloadResponse
+        internal var message: JobHelperToCloudBoardDaemonMessage
     }
 }

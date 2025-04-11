@@ -18,10 +18,10 @@
 //
 //  Created by Marc Orr on 4/23/24.
 //
-//
 
 public protocol ReportableString {
-	/// Description of the string that can safely be logged or emitted as a metric dimension in production and is
+	/// Description of the string that can safely be logged or emitted as a metric dimension in
+	/// production and is
 	/// guaranteed to not contain privacy-sensitive information
 	var publicDescription: String { get }
 }
@@ -31,11 +31,9 @@ enum EnsembleError: Error, ReportableString {
 	case illegalStateTransition
 
 	var publicDescription: String {
-		get {
-			switch self {
-			case .internalError(_): return ".internalError"
-			case .illegalStateTransition: return ".illegalStateTransition"
-			}
+		switch self {
+		case .internalError: return ".internalError"
+		case .illegalStateTransition: return ".illegalStateTransition"
 		}
 	}
 }
@@ -51,39 +49,39 @@ enum InitializationError: Error, ReportableString {
 	case unexpectedBehavior(String)
 	case cannotFindLeader
 	case invalidOperation
-    case keyDerivationError(String)
+	case keyDerivationError(String)
 
 	var publicDescription: String {
-		get {
-			switch self {
-			case .cannotFindSelfInConfiguration: return ".cannotFindSelfInConfiguration"
-			case .invalidBackend: return ".invalidBackend"
-			case .invalidHyperCubeTopology: return ".invalidHyperCubeTopology"
-			case .invalidRouterTopology: return ".invalidRouterTopology"
-			case .cannotFindNode: return ".cannotFindNode"
-			case .ensembleAlreadyActive: return ".ensembleAlreadyActive"
-			case .invalidActivationState: return ".invalidActivationState"
-			case .unexpectedBehavior: return ".unexpectedBehavior"
-			case .cannotFindLeader: return ".cannotFindLeader"
-			case .invalidOperation: return ".invalidOperation"
-            case .keyDerivationError: return ".keyDerivationError"
-			}
+		switch self {
+		case .cannotFindSelfInConfiguration: return ".cannotFindSelfInConfiguration"
+		case .invalidBackend: return ".invalidBackend"
+		case .invalidHyperCubeTopology: return ".invalidHyperCubeTopology"
+		case .invalidRouterTopology: return ".invalidRouterTopology"
+		case .cannotFindNode: return ".cannotFindNode"
+		case .ensembleAlreadyActive: return ".ensembleAlreadyActive"
+		case .invalidActivationState: return ".invalidActivationState"
+		case .unexpectedBehavior: return ".unexpectedBehavior"
+		case .cannotFindLeader: return ".cannotFindLeader"
+		case .invalidOperation: return ".invalidOperation"
+		case .keyDerivationError: return ".keyDerivationError"
 		}
 	}
 }
 
-public extension String {
+extension String {
 	/// Converts to a string that is suitable to be included in privacy-preserving logging.
-	/// If the type conforms to ``ReportableString`` the ``ReportableString/publicDescription`` is used. Otherwise
+	/// If the type conforms to ``ReportableString`` the ``ReportableString/publicDescription`` is
+	/// used. Otherwise
 	/// the name of error type is used.
-	init(reportableDescription reportableString: ReportableString) {
+	public init(reportableDescription reportableString: ReportableString) {
 		self = reportableString.publicDescription
 	}
 
 	/// Converts an error to a string that is suitable to be included in privacy-preserving logging.
-	/// If the type conforms to ``ReportableError`` the ``ReportableError/publicDescription`` is used. Otherwise the
+	/// If the type conforms to ``ReportableError`` the ``ReportableError/publicDescription`` is used.
+	/// Otherwise the
 	/// name of error type is used.
-	init(reportableError error: Error) {
+	public init(reportableError error: Error) {
 		if let reportableError = error as? ReportableString {
 			self = reportableError.publicDescription
 		} else {

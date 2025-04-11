@@ -47,6 +47,7 @@ extension TransparencyLog {
         init(
             endpoint: URL, // KTInitBag: at-researcher-list-trees
             tlsInsecure: Bool = false,
+            useIdentity: Bool = false,
             requestUUID: UUID = UUID()
         ) async throws {
             let listTreesReq = TxPB_ListTreesRequest.with { builder in
@@ -54,15 +55,15 @@ extension TransparencyLog {
                 builder.requestUuid = requestUUID.uuidString
             }
 
-            let (respData, _) = try await postPBURL(
-                logger: TransparencyLog.traceLog ? TransparencyLog.logger : nil,
+            let (respData, _) = try await TransparencyLog.urlPostProtbuf(
                 url: endpoint,
                 tlsInsecure: tlsInsecure,
+                useIdentity: useIdentity,
                 requestBody: listTreesReq.serializedData(),
                 headers: [TransparencyLog.requestUUIDHeader: requestUUID.uuidString]
             )
 
-            self.nodes = try TxPB_ListTreesResponse(serializedData: respData)
+            self.nodes = try TxPB_ListTreesResponse(serializedBytes: respData)
             if self.nodes.status != .ok {
                 throw TransparencyLogError("response: status=\(self.nodes.status.rawValue)")
             }

@@ -21,9 +21,10 @@ import Virtualization
 extension VM {
     // RestoreOptions are the parameters used to setup restore operation
     struct RestoreOptions: Codable {
-        let restoreImage: String // path to .DMG
+        let restoreImage: String // path to os image (dmg or ipsw)
         let restoreVariant: String // variant name
-        var timeoutSec: Int = 120 // bail operation if takes longer
+        var timeoutSec: UInt = 120 // bail operation if takes longer
+        var shutdownSec: UInt = 30 // bail if post-restore shutdown takes longer
         var kernelcacheOverride: String? = nil // pathnames
         var sptmOverride: String? = nil
         var txmOverride: String? = nil
@@ -33,11 +34,26 @@ extension VM {
     struct RestoreContext {
         let ecid: UInt64
         let restoreConfig: [String: Any]
-        var logDir: VMBundle.Logs?
-        var startedRestore: Bool = false
+        var logDir: VMBundle.Logs? = nil
+        let completion: DispatchSemaphore
+        var status: RestoreResult = .init()
     }
 
-    final class RestoreContextWrapper {
+    struct RestoreResult {
+        enum State: String {
+            case notstarted, started, success, failed
+        }
+
+        var state: State = .notstarted
+        var errReason: String? = nil
+
+        mutating func setResult(state: State, errReason: String? = nil) {
+            self.state = state
+            self.errReason = errReason
+        }
+    }
+
+    class RestoreContextWrapper {
         var context: RestoreContext
         init(context: RestoreContext) {
             self.context = context
@@ -51,7 +67,7 @@ extension VM {
         do {
             logDir = try VMBundle.Logs(topdir: bundle.logsPath, folder: "restore", includeTimestamp: true)
         } catch {
-            throw VMError("create logdir for \(self.name): \(error)")
+            throw VMError("create logdir for \(name): \(error)")
         }
 
         try run(dfuMode: true)
@@ -60,7 +76,8 @@ extension VM {
         if let bootArgs = restoreConfig[kAMRestoreOptionsRestoreBootArgs] as? String {
             restoreConfig[kAMRestoreOptionsRestoreBootArgs] = bootArgs + " serial=3"
         } else {
-            restoreConfig[kAMRestoreOptionsRestoreBootArgs] = "rd=md0 nand-enable-reformat=1 -progress -restore serial=3"
+            restoreConfig[kAMRestoreOptionsRestoreBootArgs] =
+                "rd=md0 nand-enable-reformat=1 -progress -restore serial=3"
         }
 
         restoreConfig[kAMRestoreOptionsPostRestoreAction] = kAMRestorePostRestoreShutdown
@@ -95,19 +112,33 @@ extension VM {
         restoreConfig[kAMRestoreOptionsRestoreBundlePath] = restoreOptions.restoreImage
         restoreConfig[kAMRestoreOptionsAuthInstallVariant] = restoreOptions.restoreVariant
 
-        let restoreContext = RestoreContext(
+        var restoreContext = RestoreContext(
             ecid: ecid,
             restoreConfig: restoreConfig,
-            logDir: logDir
+            logDir: logDir,
+            completion: DispatchSemaphore(value: 0)
         )
 
+        let loginfo = "\(restoreOptions.restoreImage) (variant: \"\(restoreOptions.restoreVariant)\")"
+        VM.logger.log("restore: \(loginfo, privacy: .public)")
+
+        try performRestore(restoreContext: &restoreContext, timeoutSec: restoreOptions.timeoutSec)
+
+        // VM still in process of shutting down
+        try await awaitShutdown(timeout: TimeInterval(restoreOptions.shutdownSec))
+    }
+
+    // performRestore configures and initiates callback chain to perform the restore for instance VM; it
+    //  awaits on semaphore passed in via restoreContext (which also contains the result of the operation).
+    //  Error is thrown if unable to initiate or deadline reached awaiting completion.
+    private func performRestore(restoreContext: inout RestoreContext,
+                                timeoutSec: UInt) throws
+    {
         let contextWrapper = RestoreContextWrapper(context: restoreContext)
         let contextWrapperRaw = Unmanaged<RestoreContextWrapper>.passRetained(contextWrapper)
         defer {
             contextWrapperRaw.release()
         }
-
-        VM.logger.log("restore: \(restoreOptions.restoreImage, privacy: .public) (variant: \"\(restoreOptions.restoreVariant, privacy: .public))\"")
 
         var resErr: Unmanaged<CFError>?
         let clientID = AMRestorableDeviceRegisterForNotifications(
@@ -122,108 +153,130 @@ extension VM {
         }
 
         if let resErr = resErr?.takeUnretainedValue() {
-            if let errorStr = CFErrorCopyDescription(resErr) {
-                throw VMError("failed to initiate restore: \(errorStr as String)")
-            }
+            let errReason = CFErrorCopyDescription(resErr) as? String ?? "unspecified reason"
+            contextWrapper.context.status.setResult(state: .failed,
+                                                    errReason: "failed to initiate: \(errReason)")
+            throw VMError("failed to initiate restore: \(errReason)")
         }
 
+        // update context (with results)
+        defer { restoreContext = contextWrapper.context }
+
         // await upto maxRestoreSeconds for restoreProgressCallback to complete/exit
-        try? await Task.sleep(for: .seconds(restoreOptions.timeoutSec))
-        throw VMError("timeout waiting for completion")
+        let deadline = DispatchTime.now() + Double(timeoutSec)
+        guard contextWrapper.context.completion.wait(timeout: deadline) == .success else {
+            contextWrapper.context.status.setResult(state: .failed, errReason: "completion timeout")
+            throw VMError("timeout waiting for completion")
+        }
+
+        guard contextWrapper.context.status.state == .success else {
+            throw VMError("restore failed: \(restoreContext.status.errReason ?? "unspecified reason")")
+        }
     }
 }
 
+// deviceConnectedCallback serves as the callback for AMRestorableDeviceRegisterForNotifications(),
+//  which configures the completion callback and initiates the restore before returning - if
+//  RestoreContext.logDir is set, log output files are setup for host/device/serial streams (in
+//  addition to stdout)
 private func deviceConnectedCallback(
     _ deviceRef: AMRestorableDeviceRef?,
     _ event: AMRestorableDeviceEvent,
     _ context: UnsafeMutableRawPointer? // &RestoreContext
 ) {
     let deviceRef = deviceRef!
-
-    let restoreContextPtr = Unmanaged<VM.RestoreContextWrapper>
+    let contextRef = Unmanaged<VM.RestoreContextWrapper>
         .fromOpaque(context!)
         .takeUnretainedValue()
-    let restoreContext = restoreContextPtr.context
-    let reqECID = restoreContext.ecid
-    let logDir = restoreContext.logDir
 
-    guard restoreContext.startedRestore == false else {
+    guard contextRef.context.status.state == .notstarted else {
         return
     }
 
+    let reqECID = contextRef.context.ecid
     let devECID = AMRestorableDeviceGetECID(deviceRef)
     guard reqECID == devECID else {
         return
     }
 
-    guard restoreContext.startedRestore == false else {
-        return
-    }
-
-    let devState = AMRestorableDeviceGetState(deviceRef)
     VM.logger.log("restore: connected to VM")
-
-    if devState == kAMRestorableDeviceStateBootedOS {
+    if getAMRDeviceState(deviceRef) == kAMRestorableDeviceStateBootedOS {
         let error: AMDError = AMDeviceEnterRecovery(deviceRef)
         if error != 0 {
             let errStr = AMDCopyErrorText(error).takeRetainedValue() as String? ?? "Error code: \(error)"
-            VM.logger.error("restore: failed to enter recovery mode: \(errStr, privacy: .public)")
-            exit(EXIT_FAILURE)
+            contextRef.context.status.setResult(state: .failed,
+                                                errReason: "failed to enter recovery mode: \(errStr)")
+            return
         }
-    } else {
-        VM.logger.info("restore: begin")
-        if let logDir {
-            if let logDir = try? logDir.file(name: "host") {
-                AMRestorableDeviceSetLogFileURL(
-                    deviceRef,
-                    logDir as CFURL,
-                    "HostLogType" as CFString
-                )
-            }
-
-            if let logFile = try? logDir.file(name: "device") {
-                AMRestorableDeviceSetLogFileURL(
-                    deviceRef,
-                    logFile as CFURL,
-                    "DeviceLogType" as CFString
-                )
-            }
-
-            if let logFile = try? logDir.file(name: "serial") {
-                AMRestorableDeviceSetLogFileURL(
-                    deviceRef,
-                    logFile as CFURL,
-                    "SerialLogType" as CFString
-                )
-
-                AMRestorableDeviceStartWatchingSerialLog(deviceRef)
-            }
-
-            print("Restore: logs available under \(logDir.folder.path)")
-        }
-
-        let restoreConfig = restoreContext.restoreConfig as CFDictionary
-        restoreContextPtr.context.startedRestore = true
-
-        AMRestorableDeviceRestore(
-            deviceRef,
-            restoreConfig,
-            restoreProgressCallback,
-            context
-        )
     }
 
+    guard getAMRDeviceState(deviceRef) == kAMRestorableDeviceStateDFU else {
+        let devState = getAMRDeviceState(deviceRef).description
+        contextRef.context.status.setResult(state: .failed,
+                                            errReason: "VM not in DFU mode (curstate = \(devState))")
+        return
+    }
+
+    VM.logger.info("restore: begin")
+    let logDir = contextRef.context.logDir
+    if let logDir {
+        if let logDir = try? logDir.file(name: "host") {
+            AMRestorableDeviceSetLogFileURL(
+                deviceRef,
+                logDir as CFURL,
+                "HostLogType" as CFString
+            )
+        }
+
+        if let logFile = try? logDir.file(name: "device") {
+            AMRestorableDeviceSetLogFileURL(
+                deviceRef,
+                logFile as CFURL,
+                "DeviceLogType" as CFString
+            )
+        }
+
+        if let logFile = try? logDir.file(name: "serial") {
+            AMRestorableDeviceSetLogFileURL(
+                deviceRef,
+                logFile as CFURL,
+                "SerialLogType" as CFString
+            )
+
+            AMRestorableDeviceStartWatchingSerialLog(deviceRef)
+        }
+
+        print("Restore: logs available under \(logDir.folder.path)")
+    }
+
+    let restoreConfig = contextRef.context.restoreConfig as CFDictionary
+    contextRef.context.status.state = .started
+
+    AMRestorableDeviceRestore(
+        deviceRef,
+        restoreConfig,
+        restoreProgressCallback,
+        context
+    )
+
     if event == kAMRestorableDeviceEventDisappeared {
-        VM.logger.log("restore: disconnected from VM")
+        contextRef.context.status.setResult(state: .failed,
+                                            errReason: "disconnected from VM")
     }
 }
 
+// restoreProgressCallback serves as the callback for AMRestorableDeviceRestore, called throughout
+//  the restore process and upon completion (successfull or otherwise); RestoreContext.status is
+//  set with the result and .completion semaphore - during the operation, progress is output to stdout
 private func restoreProgressCallback(
     _ deviceRef: AMRestorableDeviceRef?,
     _ restoreInfo: CFDictionary?,
-    _: UnsafeMutableRawPointer? // &RestoreContext
+    _ context: UnsafeMutableRawPointer? // &RestoreContext
 ) {
     let restoreInfo = restoreInfo! as! [String: Any]
+    let contextRef = Unmanaged<VM.RestoreContextWrapper>
+        .fromOpaque(context!)
+        .takeUnretainedValue()
 
     // print the progress if needed
     if let progress = restoreInfo[kAMRestorableDeviceInfoKeyOverallProgress as String] {
@@ -238,9 +291,6 @@ private func restoreProgressCallback(
     }
 
     let status = restoreInfo[kAMRestorableDeviceInfoKeyStatus as String]
-    guard status != nil else {
-        return
-    }
     guard let status = status as? String else {
         return
     }
@@ -255,14 +305,24 @@ private func restoreProgressCallback(
     // stop streaming serial logs
     AMRestorableDeviceStopWatchingSerialLog(deviceRef)
 
+    // record result in context
     if status == (kAMRestorableDeviceStatusSuccessful as String) {
-        VM.logger.info("restore: completed")
+        contextRef.context.status.setResult(state: .success)
+        VM.logger.log("restore: completed")
         print("[Restore] Completed")
-        exit(EXIT_SUCCESS)
+    } else {
+        var errReason = "no reason provided"
+        if let error = restoreInfo[kAMRestorableDeviceInfoKeyError as String] {
+            errReason = (error as! CFError).localizedDescription
+        }
+
+        contextRef.context.status.setResult(state: .failed, errReason: errReason)
     }
 
-    let error = restoreInfo[kAMRestorableDeviceInfoKeyError as String] as! CFError
-    VM.logger.error("restore: failed with: \(error, privacy: .public)")
-    print("ERROR: restore: failed with: \(error)")
-    exit(EXIT_FAILURE)
+    contextRef.context.completion.signal()
+}
+
+private func getAMRDeviceState(_ deviceRef: AMRestorableDeviceRef) -> AMRestorableDeviceState {
+    return AMRestorableDeviceGetStateWithVersion(deviceRef,
+                                                 OpaquePointer(getAMRestorableDeviceStateVersion2()))
 }

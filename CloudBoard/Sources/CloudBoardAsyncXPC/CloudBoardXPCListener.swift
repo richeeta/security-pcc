@@ -18,7 +18,7 @@ import Foundation
 import OSLog
 import XPC
 
-public protocol CloudBoardAsyncXPCListenerDelegate: AnyActor, Sendable {
+public protocol CloudBoardAsyncXPCListenerDelegate: Actor {
     func invalidatedConnection(_ connection: CloudBoardAsyncXPCConnection) async
 }
 

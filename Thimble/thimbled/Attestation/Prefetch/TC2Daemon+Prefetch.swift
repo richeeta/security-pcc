@@ -26,7 +26,7 @@ import PrivateCloudCompute
 extension TC2Daemon {
     func prewarmRequest(workloadType: String, workloadParameters: [String: String], bundleIdentifier: String, featureIdentifier: String) {
         // This prefetch call is from the SPI, so we will need to get out of the way for any subsequent invoke requests
-        logger.log("\(#function): \(workloadType) \(workloadParameters)")
+        logger.log("prewarm workloadType=\(workloadType) workloadParameters=\(workloadParameters)")
         self.thimbledEventContinuation.yield(
             .prewarmAttestations(
                 workloadType: workloadType,
@@ -40,7 +40,7 @@ extension TC2Daemon {
 
     func prefetchRequest(workloadType: String, workloadParameters: [String: String]) async -> Data? {
         // thtool prefetch hits this path, run a prefetch and get results right away
-        logger.log("\(#function): \(workloadType) \(workloadParameters)")
+        logger.log("prefetch workloadType=\(workloadType) workloadParameters=\(workloadParameters)")
         return await self.handlePrefetchRequest(
             workloadType: workloadType,
             workloadParameters: workloadParameters,
@@ -61,7 +61,7 @@ extension TC2Daemon {
     ) async -> Data? {
         let jsonEncoder = tc2JSONEncoder()
         guard let attestationStore = self.attestationStore else {
-            logger.log("\(#function): store unavailable")
+            logger.log("store unavailable")
             return nil
         }
         do {
@@ -77,6 +77,7 @@ extension TC2Daemon {
                     attestationVerifier: self.attestationVerifier,
                     config: self.config,
                     serverDrivenConfig: self.serverDrivenConfig,
+                    systemInfo: systemInfo,
                     parameters: parameters,
                     eventStreamContinuation: self.thimbledEventContinuation,
                     prewarm: prewarm,
@@ -95,7 +96,7 @@ extension TC2Daemon {
                 return try jsonEncoder.encode(response)
             }
         } catch {
-            logger.log("\(#function): failed prefetch attestations: \(error)")
+            logger.log("failed prefetch attestations: \(error)")
             return nil
         }
     }

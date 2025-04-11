@@ -146,26 +146,6 @@ struct TC2AttestationVerificationMetric: TC2CloudTelemetryReportable {
     }
 }
 
-// This will be reported each time we try to prefetch attestations
-struct TC2PrefetchAttestationMetric: TC2CloudTelemetryReportable {
-    let name: String = "PrefetchAttestation"  // Need the actual name
-    var fields: [EventName: EventValue] = [:]
-    var bundleID: String?
-
-    enum EventName: String {
-        // High level fields
-        case eventTime = "eventtime"
-        case environment = "env"
-        case clientInfo = "appleClientInfo"
-        case locale = "appleLocale"
-
-        case prefetchSuccess = "prefetchSuccess"
-        case prefetchError = "prefetchError"
-        case attestationCount = "attestationCount"
-        case successfulSaveCount = "successfulSaveCount"
-    }
-}
-
 // Metric for proto errors around the trusted endpoint response.
 struct TC2TrustedEndpointResponseMetric: TC2CloudTelemetryReportable {
     let name: String = "Trusted20240228005617"

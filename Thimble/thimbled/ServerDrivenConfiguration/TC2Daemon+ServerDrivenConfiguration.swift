@@ -25,7 +25,12 @@ import PrivateCloudCompute
 
 extension TC2Daemon {
     func fetchServerDrivenConfiguration() async -> Data {
-        let request = TC2UpdateServerDrivenConfigurationRequest(serverDrivenConfiguration: self.serverDrivenConfig, requestID: UUID(), config: self.config)
+        let request = TC2UpdateServerDrivenConfigurationRequest(
+            serverDrivenConfiguration: self.serverDrivenConfig,
+            systemInfo: systemInfo,
+            requestID: UUID(),
+            config: self.config
+        )
 
         do {
             try await request.sendRequest()
@@ -59,7 +64,10 @@ extension TC2Daemon {
 
     func setServerDrivenConfiguration(json: Data) async -> Data {
         await self.serverDrivenConfig.updateJsonModel(json)
-        TC2DefaultConfiguration.writeBackProposedLiveOnEnvironment(self.serverDrivenConfig)
+        TC2DefaultConfiguration.writeBackProposedLiveOnEnvironment(
+            serverDrivenConfiguration: self.serverDrivenConfig,
+            systemInfo: systemInfo
+        )
 
         let encoder = tc2JSONEncoder()
         let model = self.serverDrivenConfig.jsonModel

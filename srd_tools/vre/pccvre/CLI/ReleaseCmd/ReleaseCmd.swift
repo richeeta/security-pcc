@@ -25,31 +25,151 @@ extension CLI {
             abstract: "Interact with releases in the Private Cloud Compute Transparency Log.",
             subcommands: [
                 ReleaseListCmd.self,
+                ReleaseDumpCmd.self,
                 ReleaseDownloadCmd.self,
+                ReleaseVerifyCmd.self,
             ]
         )
 
         struct options: ParsableArguments {
             @Option(name: [.customLong("environment"), .customShort("E")],
-                    help: ArgumentHelp("Select Transparency Log service environment",
+                    help: ArgumentHelp("Select Transparency Log service environment.",
                                        visibility: .customerHidden))
             var environment = CLIDefaults.ktEnvironment
 
             // Debugging/test options
             @Option(name: [.customLong("ktinitendpoint")],
-                    help: ArgumentHelp("KT Init Bag enpoint (req'd when --env=none)",
+                    help: ArgumentHelp("KT Init Bag enpoint (req'd when --env=none).",
                                        visibility: .customerHidden),
                     transform: { try CLI.parseURL($0) })
             var ktInitEndpoint: URL?
 
             @Flag(name: [.customLong("tlsinsecure")],
-                  help: ArgumentHelp("Disable TLS verification", visibility: .customerHidden))
+                  help: ArgumentHelp("Disable TLS verification.", visibility: .customerHidden))
             var tlsInsecure: Bool = false
 
             @Flag(name: [.customLong("tracelog")],
-                  help: ArgumentHelp("Enable tracing of calls to Transparency Log",
+                  help: ArgumentHelp("Enable tracing of calls to Transparency Log.",
                                      visibility: .customerHidden))
             var traceLog: Bool = false
+        }
+
+        // ReleaseInfo provides simple representation of a SW Release entry from the Transparency Log
+        //   for display as json output (and logging)
+        struct ReleaseInfo: Encodable {
+            struct Tickets: Codable {
+                var ap: String
+                var code: [String] = []
+                var data: [String] = []
+            }
+
+            let index: UInt64
+            let dataHash: String
+            let expireTime: UInt64 // unix epoch time
+            let tickets: Tickets
+            var createTime: UInt64? {
+                guard let createTime = metadata?.timestamp else { return nil }
+
+                return UInt64(createTime.timeIntervalSince1970)
+            }
+            let rawData: Data?
+            var metadataJson: String? { try? metadata?.jsonString() }
+            let isDownloadable: Bool
+            let parsedDescription: String? // Image4 manifest properties of tickets
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(tickets, forKey: .tickets)
+                try container.encode(index, forKey: .index)
+                try container.encode(dataHash, forKey: .dataHash)
+                try container.encode(expireTime, forKey: .expireTime)
+                try container.encode(createTime, forKey: .createTime)
+                try container.encode(rawData, forKey: .rawData)
+                try container.encode(metadataJson, forKey: .metadata)
+                try container.encode(isDownloadable, forKey: .downloadable)
+                try container.encode(parsedDescription, forKey: .parsedDescription)
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case tickets, index, dataHash, expireTime, createTime, rawData, metadata, downloadable, parsedDescription
+            }
+
+            private var metadata: SWReleaseMetadata? = nil
+
+            init(_ rel: SWRelease) async {
+                self.index = rel.index
+                self.dataHash = rel.dataHash.hexString
+                self.expireTime = rel.nodeData.expiryMs / 1000
+                self.rawData = rel.rawData
+                self.parsedDescription = rel.tickets?.debugDescription
+
+                var relTickets = ReleaseInfo.Tickets(
+                    ap: rel.apManifest!.description
+                )
+
+                if let cryptexManifests = rel.cryptexManifests {
+                    for cM in cryptexManifests {
+                        if cM.isDataOnly() {
+                            relTickets.data.append(cM.description)
+                        } else {
+                            relTickets.code.append(cM.description)
+                        }
+                    }
+                }
+
+                self.tickets = relTickets
+                self.metadata = rel.metadata
+                self.isDownloadable = (try? await rel.metadata?.isDownloadable) ?? false
+            }
+
+            var isExpired: Bool {
+                expireTime < Int(Date().timeIntervalSince1970)
+            }
+
+            var statusDescription: String {
+                let isTerminalWide = Terminal.size.columns >= 98
+                var result = [String]()
+
+                if isDownloadable {
+                    result.append(isTerminalWide ? "downloadable" : "D")
+                }
+
+                if isExpired {
+                    result.append(isTerminalWide ? "expired" : "E")
+                }
+
+                if result.isEmpty {
+                    return ""
+                }
+
+                return " (\(result.joined(separator: isTerminalWide ? ", " : ",")))"
+            }
+
+            func printableString(prefix: String = "") -> String {
+                var builder = ""
+
+                builder += prefix + "Expires: \(dateAsString(expireTime))\n"
+                if let pDate = createTime {
+                    builder += prefix + "Created: \(dateAsString(pDate))\n"
+                } else {
+                    // no metadata available
+                    builder += prefix + "[not published]\n"
+                }
+
+                builder += prefix + "Tickets\n"
+                builder += prefix + "      OS: \(tickets.ap)\n"
+                if !tickets.code.isEmpty || !tickets.data.isEmpty {
+                    builder += prefix + "    Cryptexes\n"
+                    for c in tickets.code {
+                        builder += prefix + "    Code: \(c)\n"
+                    }
+                    for c in tickets.data {
+                        builder += prefix + "    Data: \(c)\n"
+                    }
+                }
+
+                return builder
+            }
         }
     }
 }

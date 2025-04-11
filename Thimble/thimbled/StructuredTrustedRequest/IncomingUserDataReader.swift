@@ -21,7 +21,7 @@
 
 import CollectionsInternal
 import PrivateCloudCompute
-import os
+import Synchronization
 
 import struct Foundation.Data
 
@@ -33,16 +33,16 @@ final class IncomingUserDataReader: Sendable, IncomingUserDataReaderProtocol {
         case finished
     }
 
-    let stateLock: os.OSAllocatedUnfairLock<State>
-    let serverRequestID: UUID
-    let logger = tc2Logger(forCategory: .TrustedRequest)
+    let stateLock: Mutex<State>
+    let logger = tc2Logger(forCategory: .trustedRequest)
+    let logPrefix: String
     static let maxBufferSize = 4
 
     init(serverRequestID: UUID) {
-        self.serverRequestID = serverRequestID
         var deque = Deque<Data>()
         deque.reserveCapacity(Self.maxBufferSize)
-        self.stateLock = .init(initialState: .waitingForDemand(deque, finished: false, nil))
+        self.stateLock = Mutex(.waitingForDemand(deque, finished: false, nil))
+        self.logPrefix = "\(serverRequestID):"
     }
 
     private enum ForwardDataAction {
@@ -52,7 +52,7 @@ final class IncomingUserDataReader: Sendable, IncomingUserDataReaderProtocol {
     }
 
     func forwardData(_ data: Data) async throws {
-        self.logger.log("Request \(self.serverRequestID) | IncomingUserDataReader | Starting forwarding data: \(data.count)")
+        self.logger.log("\(self.logPrefix) IncomingUserDataReader | Starting forwarding data: \(data.count)")
         try await withCheckedThrowingContinuation { (forwardContinuation: CheckedContinuation<Void, any Error>) in
             let action = self.stateLock.withLock { state -> ForwardDataAction? in
                 switch state {
@@ -98,7 +98,7 @@ final class IncomingUserDataReader: Sendable, IncomingUserDataReaderProtocol {
                 continuation.resume()
             }
         }
-        self.logger.log("Request \(self.serverRequestID) | IncomingUserDataReader | Finished forwarding data: \(data.count)")
+        self.logger.log("\(self.logPrefix) IncomingUserDataReader | Finished forwarding data: \(data.count)")
     }
 
     func ready() {
@@ -110,7 +110,7 @@ final class IncomingUserDataReader: Sendable, IncomingUserDataReaderProtocol {
     }
 
     func finish(error: (any Error)?) {
-        self.logger.log("Request \(self.serverRequestID) | IncomingUserDataReader | Finish stream: \(error)")
+        self.logger.log("\(self.logPrefix) IncomingUserDataReader | Finish stream: \(error)")
         let continuation = self.stateLock.withLock { state -> CheckedContinuation<Data?, any Error>? in
             switch state {
             case .waitingForData(let buffer, let nextContinuation):
@@ -154,7 +154,7 @@ final class IncomingUserDataReader: Sendable, IncomingUserDataReaderProtocol {
     }
 
     func next() async throws -> Data? {
-        self.logger.log("Request \(self.serverRequestID) | IncomingUserDataReader | Starting next call")
+        self.logger.log("\(self.logPrefix) IncomingUserDataReader | Starting next call")
         let result = try await withCheckedThrowingContinuation { (nextContinuation: CheckedContinuation<Data?, any Error>) in
             let action = self.stateLock.withLock { state -> NextAction? in
                 switch state {
@@ -201,7 +201,7 @@ final class IncomingUserDataReader: Sendable, IncomingUserDataReaderProtocol {
             }
         }
 
-        self.logger.log("Request \(self.serverRequestID) | IncomingUserDataReader | Finished next call - \(result?.count ?? -1) bytes")
+        self.logger.log("\(self.logPrefix) IncomingUserDataReader | Finished next call - \(result?.count ?? -1) bytes")
         return result
     }
 }

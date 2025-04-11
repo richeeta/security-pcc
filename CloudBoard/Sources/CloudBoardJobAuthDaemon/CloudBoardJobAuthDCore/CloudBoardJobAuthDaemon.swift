@@ -24,7 +24,7 @@ import os
 
 /// Long-lived daemon responsible for fetching and managing TGT and OTT signing keys that cb_jobhelper uses for
 /// authenticating requests
-public struct CloudBoardJobAuthDaemon {
+public struct CloudBoardJobAuthDaemon: Sendable {
     public static let logger: Logger = .init(
         subsystem: "com.apple.cloudos.cb_jobauthd",
         category: "CloudBoardJobAuthDaemon"

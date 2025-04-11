@@ -21,4 +21,10 @@
 #import <sys/csr.h>
 #import <os/variant_private.h>
 
+static inline const void*
+getAMRestorableDeviceStateVersion2()
+{
+    return &kAMRestorableDeviceStateVersion2;
+}
+
 #endif

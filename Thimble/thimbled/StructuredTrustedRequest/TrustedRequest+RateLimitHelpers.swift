@@ -23,12 +23,12 @@ import Foundation
 import PrivateCloudCompute
 
 extension RateLimiterRequestMetadata {
-    init(configuration: TrustedRequestConfiguration, paramaters: TC2RequestParameters) {
+    init(configuration: TrustedRequestConfiguration, parameters: TC2RequestParameters) {
         self.init(
             bundleID: configuration.bundleID,
             featureID: configuration.featureID ?? "",
-            workloadType: paramaters.pipelineKind,
-            workloadTags: paramaters.pipelineArguments
+            workloadType: parameters.pipelineKind,
+            workloadTags: parameters.pipelineArguments
         )
     }
 }

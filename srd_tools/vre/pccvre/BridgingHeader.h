@@ -23,9 +23,13 @@
 #import <AMAuthInstallTag.h>
 #import <AMAuthInstallRequest.h>
 #import <AMAuthInstallApImg4.h>
+#import <apfs/apfs_fsctl.h>
 #import <sys/csr.h>
 #import <os/variant_private.h>
 #import <bootpolicy/bootpolicy.h>
 #import <MachO/MachO.h>
+
+// make APFSIOC_MARK_PURGEABLE usable from Swift (from SharingServices/SFCommon.h)
+static inline unsigned long SF_APFSIOC_MARK_PURGEABLE(void) { return APFSIOC_MARK_PURGEABLE; }
 
 #endif

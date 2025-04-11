@@ -9,6 +9,3 @@
 // https://help.apple.com/xcode/#/dev745c5c974
 
 #include "Release.xcconfig"
-
-// MARK: - Swift
-SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos*] =$(inherit) DISABLE_MOSAIC

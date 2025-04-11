@@ -22,12 +22,12 @@
 @_spi(NWActivity) @_spi(OHTTP) @_spi(NWConnection) import Network
 import OSLog
 import PrivateCloudCompute
-import os
+import Synchronization
 
 final class NWConnectionWrapper: Sendable {
-    let underlying: NWConnection
-    let logger: Logger
-    let logPrefix: String
+    private let underlying: NWConnection
+    private let logger: Logger
+    private let logPrefix: String
     private let readyEvent: TC2Event<Void>?
 
     private enum State {
@@ -36,18 +36,15 @@ final class NWConnectionWrapper: Sendable {
         case connected
     }
 
-    private let stateLock = OSAllocatedUnfairLock<State>(initialState: .connecting)
+    private let stateLock = Mutex<State>(.connecting)
 
-    init(underlying: NWConnection, readyEvent: TC2Event<Void>?, logger: Logger, requestID: UUID?) {
+    init(underlying: NWConnection, readyEvent: TC2Event<Void>?, logger: Logger, requestID: UUID) {
         self.underlying = underlying
         self.logger = logger
-        if let requestID {
-            self.logPrefix = "Request \(requestID) NWConnection \(underlying.identifier):"
-        } else {
-            self.logPrefix = "NWConnection \(underlying.identifier):"
-        }
+        self.logPrefix = "\(requestID).\(underlying.identifier):"
+        logger.debug("\(self.logPrefix) wrap")
         self.readyEvent = readyEvent
-        // We delibritaly set up a reference cycle between the self and the underlying connection.
+        // We deliberately set up a reference cycle between the self and the underlying connection.
         // We are aware that weak exists. But we prefer to break the reference cycle instead.
         // Performance is much better without weak references.
         self.underlying.stateUpdateHandler = { [self] newState in
@@ -56,13 +53,13 @@ final class NWConnectionWrapper: Sendable {
     }
 
     func start(queue: DispatchQueue) {
+        self.logger.debug("\(self.logPrefix) start")
         self.underlying.start(queue: queue)
     }
 
     func cancel() {
+        self.logger.log("\(self.logPrefix) cancel")
         self.underlying.cancel()
-        // this breaks the reference cycle with self.
-        self.underlying.stateUpdateHandler = nil
     }
 
     func write(
@@ -70,10 +67,8 @@ final class NWConnectionWrapper: Sendable {
         contentContext: NWConnection.ContentContext,
         isComplete: Bool
     ) async throws {
-        self.logger.debug(
-            "\(self.logPrefix) Writing to NW connection: content:\(content?.count ?? -1) context: \(contentContext.identifier) isComplete:\(isComplete)"
-        )
         try await withTaskCancellationHandler {
+            self.logger.debug("\(self.logPrefix) send content.count=\(content?.count ?? -1) context=\(contentContext.identifier) isComplete=\(isComplete)")
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 self.underlying.send(
                     content: content,
@@ -81,7 +76,7 @@ final class NWConnectionWrapper: Sendable {
                     isComplete: isComplete,
                     completion: .contentProcessed { error in
                         if let error {
-                            self.logger.error("\(self.logPrefix) Write failed error:\(error)")
+                            self.logger.error("\(self.logPrefix) send failed error=\(error)")
                             let errorToThrow = self.stateLock.withLock { state -> NWError in
                                 switch state {
                                 case .connecting, .connected:
@@ -92,19 +87,21 @@ final class NWConnectionWrapper: Sendable {
                             }
                             continuation.resume(throwing: errorToThrow)
                         } else {
-                            self.logger.debug("\(self.logPrefix) Write finished")
                             continuation.resume(returning: ())
                         }
                     }
                 )
             }
+            self.logger.debug("\(self.logPrefix) send finished")
         } onCancel: {
+            self.logger.log("\(self.logPrefix) send cancelled")
             self.underlying.forceCancel()
         }
     }
 
     func next() async throws -> NWConnectionReceived {
         try await withTaskCancellationHandler {
+            self.logger.debug("\(self.logPrefix) receive")
             let (data, contentContext, isComplete, error) = await withCheckedContinuation { continuation in
                 self.underlying.receive(
                     minimumIncompleteLength: 1,
@@ -113,7 +110,7 @@ final class NWConnectionWrapper: Sendable {
                     continuation.resume(returning: (data, contentContext, isComplete, error))
                 }
             }
-            self.logger.debug("\(self.logPrefix) Received data on NW connection: data:\(data?.count ?? -1) isComplete:\(isComplete) error: \(error)")
+            self.logger.debug("\(self.logPrefix) receive finished data.count=\(data?.count ?? -1) isComplete=\(isComplete) error=\(error)")
 
             if let error {
                 // we need to check if we have seen a waiting before and NOT a ready! If we got a
@@ -133,6 +130,7 @@ final class NWConnectionWrapper: Sendable {
         } onCancel: {
             // We are force cancelling here since Swift cancellation should be as immediate
             // as possible.
+            self.logger.log("\(self.logPrefix) receive cancelled")
             self.underlying.forceCancel()
         }
     }
@@ -140,13 +138,13 @@ final class NWConnectionWrapper: Sendable {
     private func connectionStateUpdated(_ newState: NWConnection.State) {
         switch newState {
         case .setup:
-            self.logger.debug("\(self.logPrefix) NWConnection state changed to setup")
+            self.logger.debug("\(self.logPrefix) state changed to setup")
         case .preparing:
-            self.logger.debug("\(self.logPrefix) NWConnection state changed to preparing")
+            self.logger.debug("\(self.logPrefix) state changed to preparing")
             break
 
         case .waiting(let error):
-            self.logger.warning("\(self.logPrefix) NWConnection state changed to waiting \(error)")
+            self.logger.error("\(self.logPrefix) state changed to waiting error=\(error)")
             // this is the callback we get, if a connection can not be established right away
             let cancelIfNetworkUnavailable = self.stateLock.withLock { state -> Bool in
                 switch state {
@@ -169,10 +167,12 @@ final class NWConnectionWrapper: Sendable {
             if cancelIfNetworkUnavailable && self.underlying.currentPath?.status == .unsatisfied {
                 // there is no viable network. therefore we want to cancel right away.
                 self.cancel()
+                // this will nullify self.underlying.stateUpdateHandler and effectively break the reference cycle with self
+                self.underlying.stateUpdateHandler = nil
             }
 
         case .ready:
-            self.logger.debug("\(self.logPrefix) NWConnection state changed to ready")
+            self.logger.debug("\(self.logPrefix) state changed to ready")
             self.stateLock.withLock { state in
                 switch state {
                 case .connecting, .waiting:
@@ -186,10 +186,10 @@ final class NWConnectionWrapper: Sendable {
             self.readyEvent?.fireNonisolated()
 
         case .failed(let error):
-            self.logger.error("\(self.logPrefix) NWConnection state changed to failed \(error)")
+            self.logger.error("\(self.logPrefix) state changed to failed error=\(error)")
 
         case .cancelled:
-            self.logger.debug("\(self.logPrefix) NWConnection state changed to cancelled")
+            self.logger.debug("\(self.logPrefix) state changed to cancelled")
             let error = self.stateLock.withLock { state -> Error? in
                 switch state {
                 case .connecting:
@@ -204,7 +204,7 @@ final class NWConnectionWrapper: Sendable {
             if let error { self.readyEvent?.fireNonisolated(throwing: error) } else { self.readyEvent?.fireNonisolated() }
 
         @unknown default:
-            self.logger.warning("\(self.logPrefix) NWConnection changed to unexpected state: \(String(describing: newState), privacy: .public)")
+            self.logger.error("\(self.logPrefix) state change to unexpected state=\(String(describing: newState), privacy: .public)")
             break
         }
     }

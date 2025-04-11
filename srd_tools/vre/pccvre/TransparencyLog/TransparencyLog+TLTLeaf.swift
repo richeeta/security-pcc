@@ -38,12 +38,12 @@ extension TransparencyLog {
                 return nil
             }
 
-            guard let tltNode = try? TxPB_TopLevelTreeNode(serializedData: pb.nodeBytes) else {
+            guard let tltNode = try? TxPB_TopLevelTreeNode(serializedBytes: pb.nodeBytes) else {
                 return nil
             }
 
             
-            guard let logHead = try? TxPB_LogHead(serializedData: tltNode.patHead.object) else {
+            guard let logHead = try? TxPB_LogHead(serializedBytes: tltNode.patHead.object) else {
                 return nil
             }
 
@@ -61,12 +61,12 @@ extension TransparencyLog {
                 return nil
             }
 
-            guard let tltNode = try? TxPB_TopLevelTreeNode(serializedData: pb.nodeBytes) else {
+            guard let tltNode = try? TxPB_TopLevelTreeNode(serializedBytes: pb.nodeBytes) else {
                 return nil
             }
 
             
-            guard let logHead = try? TxPB_LogHead(serializedData: tltNode.patHead.object) else {
+            guard let logHead = try? TxPB_LogHead(serializedBytes: tltNode.patHead.object) else {
                 return nil
             }
 

@@ -26,6 +26,10 @@ struct Auditor {
     var topLevelTree: MerkleTree<SHA256>
     var delegate: Delegate?
 
+    private let appTreeFile = "applicationTree.json"
+    private let perAppTreeFile = "perApplicationTree.json"
+    private let tltTreeFile = "topLevelTree.json"
+
     init(for log: TransparencyLog, storageURL: URL) throws {
         self.log = log
         self.storageURL = storageURL
@@ -33,19 +37,19 @@ struct Auditor {
 
         try FileManager.default.createDirectory(at: storageURL, withIntermediateDirectories: true)
 
-        if let applicationTreeData = try? Data(contentsOf: storageURL.appending(path: "applicationTree.json")) {
+        if let applicationTreeData = try? Data(contentsOf: storageURL.appending(path: appTreeFile)) {
             self.applicationTree = try decoder.decode(MerkleTree<SHA256>.self, from: applicationTreeData)
         } else {
             self.applicationTree = .init()
         }
 
-        if let perApplicationTreeData = try? Data(contentsOf: storageURL.appending(path: "perApplicationTree.json")) {
+        if let perApplicationTreeData = try? Data(contentsOf: storageURL.appending(path: perAppTreeFile)) {
             self.perApplicationTree = try decoder.decode(MerkleTree<SHA256>.self, from: perApplicationTreeData)
         } else {
             self.perApplicationTree = .init()
         }
 
-        if let topLevelTreeFileData = try? Data(contentsOf: storageURL.appending(path: "topLevelTree.json")) {
+        if let topLevelTreeFileData = try? Data(contentsOf: storageURL.appending(path: tltTreeFile)) {
             self.topLevelTree = try decoder.decode(MerkleTree<SHA256>.self, from: topLevelTreeFileData)
         } else {
             self.topLevelTree = .init()
@@ -74,25 +78,37 @@ struct Auditor {
         // write all 3 files, then move all 3
         let encoder = JSONEncoder()
 
-        let atURL = storageURL.appending(path: "applicationTree.json")
-        let tempATURL = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: atURL, create: true).appending(path: "applicationTree.json")
+        let atURL = storageURL.appending(path: appTreeFile)
+        let tempATURL = try FileManager.default.url(for: .itemReplacementDirectory,
+                                                    in: .userDomainMask,
+                                                    appropriateFor: atURL,
+                                                    create: true).appending(path: appTreeFile)
 
-        let patURL = storageURL.appending(path: "perApplicationTree.json")
-        let tempPATURL = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: patURL, create: true).appending(path: "perApplicationTree.json")
+        let patURL = storageURL.appending(path: perAppTreeFile)
+        let tempPATURL = try FileManager.default.url(for: .itemReplacementDirectory,
+                                                     in: .userDomainMask,
+                                                     appropriateFor: patURL,
+                                                     create: true).appending(path: perAppTreeFile)
 
-        let topLevelURL = storageURL.appending(path: "topLevelTree.json")
+        let topLevelURL = storageURL.appending(path: tltTreeFile)
         let tempTopLevelURL = try FileManager.default.url(for: .itemReplacementDirectory,
                                                           in: .userDomainMask,
                                                           appropriateFor: topLevelURL,
-                                                          create: true).appending(path: "topLevelTree.json")
+                                                          create: true).appending(path: tltTreeFile)
 
         try encoder.encode(applicationTree).write(to: tempATURL)
         try encoder.encode(perApplicationTree).write(to: tempPATURL)
         try encoder.encode(topLevelTree).write(to: tempTopLevelURL)
 
-        _ = try FileManager.default.replaceItemAt(atURL, withItemAt: tempATURL, backupItemName: "_applicationTree.json")
-        _ = try FileManager.default.replaceItemAt(patURL, withItemAt: tempPATURL, backupItemName: "_perApplicationTree.json")
-        _ = try FileManager.default.replaceItemAt(topLevelURL, withItemAt: tempTopLevelURL, backupItemName: "_topLevelTree.json")
+        _ = try FileManager.default.replaceItemAt(atURL,
+                                                  withItemAt: tempATURL,
+                                                  backupItemName: "\(appTreeFile).bak")
+        _ = try FileManager.default.replaceItemAt(patURL,
+                                                  withItemAt: tempPATURL,
+                                                  backupItemName: "\(perAppTreeFile).bak")
+        _ = try FileManager.default.replaceItemAt(topLevelURL,
+                                                  withItemAt: tempTopLevelURL,
+                                                  backupItemName: "\(tltTreeFile).bak")
     }
 
     private mutating func updateObjectTree() async throws -> UInt64 {
@@ -100,27 +116,37 @@ struct Auditor {
         let tree = try await log.fetchLogTree(logType: .atLog)
         let head = try await log.fetchLogHead(logTree: tree)
 
-        await delegate?.handleAuditEvent(.fetchedLogHead(tree: .application, position: myTreeSize, count: head.size))
-        let newLeaves = try await log.fetchLogLeaves(type: TransparencyLog.ATLeaf.self, tree: tree, head: head, start: myTreeSize)
+        await delegate?.handleAuditEvent(.fetchedLogHead(tree: .application,
+                                                         position: myTreeSize,
+                                                         count: head.size))
+        let newLeaves = try await log.fetchLogLeaves(type: TransparencyLog.ATLeaf.self,
+                                                     tree: tree,
+                                                     head: head,
+                                                     start: myTreeSize)
 
         for leaf in newLeaves {
             applicationTree.append(leaf.nodeBytes)
-            await delegate?.handleAuditEvent(.fetchedLeaf(tree: .application, position: UInt64(applicationTree.count), digest: Data(SHA256.leaf(data: leaf.nodeBytes))))
+            await delegate?.handleAuditEvent(.fetchedLeaf(tree: .application,
+                                                          position: UInt64(applicationTree.count),
+                                                          digest: Data(SHA256.leaf(data: leaf.nodeBytes))))
         }
 
         let updatedCount = applicationTree.count
         guard head.size == updatedCount else {
-            await delegate?.handleAuditEvent(.constructionCompleted(tree: .application, status: .invalid))
+            await delegate?.handleAuditEvent(.constructionCompleted(tree: .application,
+                                                                    status: .invalid))
             throw TransparencyLogError("Object tree size \(updatedCount) != log head tree size \(head.size)")
         }
 
         let merkleTreeDigest = applicationTree.rootDigest
 
         guard merkleTreeDigest == head.hash else {
-            await delegate?.handleAuditEvent(.constructionCompleted(tree: .application, status: .invalid))
+            await delegate?.handleAuditEvent(.constructionCompleted(tree: .application,
+                                                                    status: .invalid))
             throw TransparencyLogError("Object tree root hash \(merkleTreeDigest.hexString) does not match log head digest \(head.hash.hexString)")
         }
-        await delegate?.handleAuditEvent(.constructionCompleted(tree: .application, status: .valid(rootDigest: merkleTreeDigest)))
+        await delegate?.handleAuditEvent(.constructionCompleted(tree: .application,
+                                                                status: .valid(rootDigest: merkleTreeDigest)))
         return head.treeID
     }
 
@@ -129,8 +155,13 @@ struct Auditor {
         let tree = try await log.fetchLogTree(logType: .perApplicationTree)
         let head = try await log.fetchLogHead(logTree: tree)
 
-        await delegate?.handleAuditEvent(.fetchedLogHead(tree: .perApplication, position: myTreeSize, count: head.size))
-        let newLeaves = try await log.fetchLogLeaves(type: TransparencyLog.PATLeaf.self, tree: tree, head: head, start: myTreeSize)
+        await delegate?.handleAuditEvent(.fetchedLogHead(tree: .perApplication,
+                                                         position: myTreeSize,
+                                                         count: head.size))
+        let newLeaves = try await log.fetchLogLeaves(type: TransparencyLog.PATLeaf.self,
+                                                     tree: tree,
+                                                     head: head,
+                                                     start: myTreeSize)
 
         guard head.size == (myTreeSize + UInt64(newLeaves.count)) else {
             throw TransparencyLogError("fetchLogLeaves returned short number of items")
@@ -140,7 +171,9 @@ struct Auditor {
 
         for leaf in newLeaves {
             perApplicationTree.append(leaf.nodeBytes)
-            await delegate?.handleAuditEvent(.fetchedLeaf(tree: .perApplication, position: UInt64(perApplicationTree.count), digest: Data(SHA256.leaf(data: leaf.nodeBytes))))
+            await delegate?.handleAuditEvent(.fetchedLeaf(tree: .perApplication,
+                                                          position: UInt64(perApplicationTree.count),
+                                                          digest: Data(SHA256.leaf(data: leaf.nodeBytes))))
 
             switch leaf.node {
             case .config:
@@ -152,7 +185,8 @@ struct Auditor {
                 let size = Int(head.size)
                 let subDigest = applicationTree.digest(range: ..<size)
                 guard subDigest == head.hash else {
-                    await delegate?.handleAuditEvent(.constructionCompleted(tree: .perApplication, status: .invalid))
+                    await delegate?.handleAuditEvent(.constructionCompleted(tree: .perApplication,
+                                                                            status: .invalid))
                     throw TransparencyLogError("Revision tree digest mismatch for revision \(head.revision), size \(head.size): \(subDigest.hexString) != \(head.hash.hexString)")
                 }
             }
@@ -160,17 +194,20 @@ struct Auditor {
 
         let updatedCount = perApplicationTree.count
         guard head.size == updatedCount else {
-            await delegate?.handleAuditEvent(.constructionCompleted(tree: .perApplication, status: .invalid))
+            await delegate?.handleAuditEvent(.constructionCompleted(tree: .perApplication,
+                                                                    status: .invalid))
             throw TransparencyLogError("Revision tree size \(updatedCount) != log head tree size \(head.size)")
         }
 
         let merkleTreeDigest = perApplicationTree.rootDigest
 
         guard merkleTreeDigest == head.hash else {
-            await delegate?.handleAuditEvent(.constructionCompleted(tree: .perApplication, status: .invalid))
+            await delegate?.handleAuditEvent(.constructionCompleted(tree: .perApplication,
+                                                                    status: .invalid))
             throw TransparencyLogError("Revision tree root hash \(merkleTreeDigest.hexString) does not match log head digest \(head.hash.hexString)")
         }
-        await delegate?.handleAuditEvent(.constructionCompleted(tree: .perApplication, status: .valid(rootDigest: merkleTreeDigest)))
+        await delegate?.handleAuditEvent(.constructionCompleted(tree: .perApplication,
+                                                                status: .valid(rootDigest: merkleTreeDigest)))
         return head.treeID
     }
 
@@ -179,15 +216,22 @@ struct Auditor {
         let tree = try await log.fetchLogTree(logType: .topLevelTree, application: .unknownApplication)
         let head = try await log.fetchLogHead(logTree: tree)
 
-        await delegate?.handleAuditEvent(.fetchedLogHead(tree: .topLevel, position: myTreeSize, count: head.size))
-        let newLeaves = try await log.fetchLogLeaves(type: TransparencyLog.TLTLeaf.self, tree: tree, head: head, start: myTreeSize)
+        await delegate?.handleAuditEvent(.fetchedLogHead(tree: .topLevel,
+                                                         position: myTreeSize,
+                                                         count: head.size))
+        let newLeaves = try await log.fetchLogLeaves(type: TransparencyLog.TLTLeaf.self,
+                                                     tree: tree,
+                                                     head: head,
+                                                     start: myTreeSize)
 
         // update revision tree
         let revisionTreeID = try await updateRevisionTree()
 
         for leaf in newLeaves {
             topLevelTree.append(leaf.nodeBytes)
-            await delegate?.handleAuditEvent(.fetchedLeaf(tree: .topLevel, position: UInt64(topLevelTree.count), digest: Data(SHA256.leaf(data: leaf.nodeBytes))))
+            await delegate?.handleAuditEvent(.fetchedLeaf(tree: .topLevel,
+                                                          position: UInt64(topLevelTree.count),
+                                                          digest: Data(SHA256.leaf(data: leaf.nodeBytes))))
             
             switch leaf.node {
             case .config:
@@ -200,7 +244,8 @@ struct Auditor {
                 let size = Int(head.size)
                 let subDigest = perApplicationTree.digest(range: ..<size)
                 guard subDigest == head.hash else {
-                    await delegate?.handleAuditEvent(.constructionCompleted(tree: .topLevel, status: .invalid))
+                    await delegate?.handleAuditEvent(.constructionCompleted(tree: .topLevel,
+                                                                            status: .invalid))
                     throw TransparencyLogError("Top Level Tree digest mismatch for revision \(head.revision), size \(head.size): \(subDigest.hexString) != \(head.hash.hexString)")
                 }
             }
@@ -219,12 +264,7 @@ struct Auditor {
             await delegate?.handleAuditEvent(.constructionCompleted(tree: .topLevel, status: .invalid))
             throw TransparencyLogError("Top level tree root hash \(merkleTreeDigest.hexString) does not match log head digest \(head.hash.hexString)")
         }
-        await delegate?.handleAuditEvent(.constructionCompleted(tree: .topLevel, status: .valid(rootDigest: merkleTreeDigest)))
-    }
-}
-
-private extension SHA256Digest {
-    var hexString: String {
-        compactMap { String(format: "%02x", $0) }.joined()
+        await delegate?.handleAuditEvent(.constructionCompleted(tree: .topLevel,
+                                                                status: .valid(rootDigest: merkleTreeDigest)))
     }
 }

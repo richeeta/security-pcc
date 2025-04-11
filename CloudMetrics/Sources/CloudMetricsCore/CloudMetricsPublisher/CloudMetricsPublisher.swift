@@ -19,15 +19,13 @@
 //  Created by Andrea Guzzo on 10/4/23.
 //
 
+internal import CloudMetricsConstants
 import Foundation
-import MobileGestaltPrivate
-import os
-
-private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsPublisher")
+internal import os
 
 internal protocol CloudMetricsPublisher: Sendable {
     func run() async throws
     func getMetricsStore(for client: String) throws -> MetricsStore?
-    func getDestination(for client: String) -> CloudMetricsDestination
+    func getDestination(for client: String) -> Configuration.Destination
     func shutdown() async throws
 }

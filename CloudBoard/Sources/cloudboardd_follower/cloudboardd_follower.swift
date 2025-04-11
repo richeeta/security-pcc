@@ -14,7 +14,7 @@
 
 //  Copyright © 2023 Apple Inc. All rights reserved.
 
-import ArgumentParser
+import ArgumentParserInternal
 import CloudBoardDFollowerCore
 
 @main

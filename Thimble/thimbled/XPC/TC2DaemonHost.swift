@@ -44,17 +44,21 @@ protocol TC2DaemonHostDelegate: Sendable {
 }
 
 /// This object implements the protocol which we have defined. It provides the actual behavior for the service. It is 'exported' by the service to make it available to the process hosting the service over an NSXPCConnection.
-final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
-    let logger = tc2Logger(forCategory: .Daemon)
+final class TC2DaemonHost<
+    SystemInfo: SystemInfoProtocol
+>: NSObject, TC2DaemonProtocol, @unchecked Sendable {
+    let logger = tc2Logger(forCategory: .daemon)
     let delegate: TC2DaemonHostDelegate
     let connection: NSXPCConnection
     let config: TC2Configuration
+    let systemInfo: SystemInfo
     let rateLimitValve: OverflowValve<ContinuousClock>
 
-    init(config: TC2Configuration, delegate: TC2DaemonHostDelegate, connection: NSXPCConnection) {
+    init(config: TC2Configuration, systemInfo: SystemInfo, delegate: TC2DaemonHostDelegate, connection: NSXPCConnection) {
         self.delegate = delegate
         self.connection = connection
         self.config = config
+        self.systemInfo = systemInfo
         self.rateLimitValve = OverflowValve(
             frequency: Duration.seconds(config[.rateLimitRequestMinimumSpacing]),
             clock: ContinuousClock()
@@ -66,7 +70,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
             return completion("")
         }
 
-        completion(self.config.environment.name)
+        completion(self.config.environment(systemInfo: self.systemInfo).name)
     }
 
     /// This implements the example protocol. Replace the body of this class with the implementation of this service's protocol.
@@ -104,12 +108,12 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
         featureIdentifier: String?,
         sessionIdentifier: UUID?
     ) throws(TrustedCloudComputeError) -> any TC2XPCTrustedRequestProtocol {
-        guard hasEntitlement(.requests) || hasEntitlement(.requests_old) else {
+        guard hasEntitlement(.requests) else {
             throw TrustedCloudComputeError(message: "missing entitlements")
         }
 
         let clientBundleIdentifier = bundleIdentifierForAuditToken(auditToken: connection.auditToken)
-        let allowBundleIdentifierOverride = hasEntitlement(.bundleIdentifierOverride) || hasEntitlement(.bundleIdentifierOverride_old)
+        let allowBundleIdentifierOverride = hasEntitlement(.bundleIdentifierOverride)
         let effectiveUserIdentifier = effectiveUserIdentifier(auditToken: connection.auditToken)
 
         guard let clientBundleIdentifier else {
@@ -142,7 +146,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func requestMetadata(completion: @escaping @Sendable (Data?) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion(nil)
         }
 
@@ -150,7 +154,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func prefetchRequest(workloadType: String, workloadParameters: [String: String], completion: @escaping @Sendable (Data?) -> Void) {
-        guard hasEntitlement(.prefetchRequest) || hasEntitlement(.prefetchRequest_old) else {
+        guard hasEntitlement(.prefetchRequest) else {
             completion(nil)
             return
         }
@@ -169,12 +173,12 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
         completion: @escaping @Sendable () -> Void
     ) {
         // Entitlement is still the same, since the underlying call is going to be a prefetch
-        guard hasEntitlement(.prefetchRequest) || hasEntitlement(.prefetchRequest_old) else {
+        guard hasEntitlement(.prefetchRequest) else {
             return completion()
         }
 
         let clientBundleIdentifier = bundleIdentifierForAuditToken(auditToken: connection.auditToken)
-        let allowBundleIdentifierOverride = hasEntitlement(.bundleIdentifierOverride) || hasEntitlement(.bundleIdentifierOverride_old)
+        let allowBundleIdentifierOverride = hasEntitlement(.bundleIdentifierOverride)
 
         guard let clientBundleIdentifier else {
             return completion()
@@ -197,7 +201,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func prefetchCache(completion: @escaping @Sendable ([String]) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion([])
         }
 
@@ -208,7 +212,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func prefetchParametersCache(completion: @escaping @Sendable ([String]) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion([])
         }
 
@@ -216,7 +220,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func prefetchParametersCacheSavedState(completion: @escaping @Sendable ([String]) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion([])
         }
 
@@ -224,7 +228,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func prefetchCacheReset(completion: @escaping @Sendable (Bool) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion(false)
         }
 
@@ -239,11 +243,11 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     // server, and (b) will default to the caller's bundleID but allow them to override with the
     // correct entitlment, and therefore (c) uses its own entitlement separate from the admin one.
     func knownRateLimits(bundleIdentifier: String?, featureIdentifier: String?, skipFetch: Bool, completion: @escaping @Sendable (Data?) -> Void) {
-        guard hasEntitlement(.knownRateLimits) || hasEntitlement(.knownRateLimits_old) else {
+        guard hasEntitlement(.knownRateLimits) else {
             return completion(nil)
         }
 
-        guard hasEntitlement(.bundleIdentifierOverride) || hasEntitlement(.bundleIdentifierOverride_old) || bundleIdentifier == nil else {
+        guard hasEntitlement(.bundleIdentifierOverride) || bundleIdentifier == nil else {
             logger.log("attempt to set bundleIdentifierOverride without entitlement rejected")
             return completion(nil)
         }
@@ -264,7 +268,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func listRateLimits(bundleIdentifier: String?, featureIdentifier: String?, fetch: Bool, completion: @escaping @Sendable (Data?) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion(nil)
         }
 
@@ -284,7 +288,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
         jitter: Double,
         completion: @escaping @Sendable () -> Void
     ) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion()
         }
 
@@ -295,7 +299,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func resetRateLimits(completion: @escaping @Sendable () -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion()
         }
 
@@ -306,7 +310,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func fetchServerDrivenConfiguration(completion: @escaping @Sendable (Data) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion(Data())
         }
 
@@ -317,7 +321,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func listServerDrivenConfiguration(completion: @escaping @Sendable (Data) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion(Data())
         }
 
@@ -328,7 +332,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
     }
 
     func setServerDrivenConfiguration(json: Data, completion: @escaping @Sendable (Data) -> Void) {
-        guard hasEntitlement(.admin) || hasEntitlement(.admin_old) else {
+        guard hasEntitlement(.admin) else {
             return completion(Data())
         }
 
@@ -338,7 +342,7 @@ final class TC2DaemonHost: NSObject, TC2DaemonProtocol, @unchecked Sendable {
         }
     }
 
-    private func hasEntitlement(_ entitlement: TC2Entitlement) -> Bool {
+    private func hasEntitlement(_ entitlement: PrivateCloudComputeEntitlement) -> Bool {
         guard let value = self.connection.value(forEntitlement: entitlement.rawValue) else {
             logger.log("entitlement not present: \(entitlement.rawValue)")
             return false

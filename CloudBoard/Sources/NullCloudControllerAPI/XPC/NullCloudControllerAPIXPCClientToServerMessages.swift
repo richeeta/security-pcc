@@ -24,4 +24,9 @@ internal enum NullCloudControllerAPIXPCClientToServerMessages {
 
         var state: WorkloadControllerState
     }
+
+    internal struct RestartPrewarmedInstances: CloudBoardAsyncXPCMessage {
+        internal typealias Success = ExplicitSuccess
+        internal typealias Failure = NullCloudControllerAPIError
+    }
 }

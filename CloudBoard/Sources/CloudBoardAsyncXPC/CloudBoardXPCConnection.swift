@@ -38,7 +38,10 @@ public actor CloudBoardAsyncXPCConnection: Identifiable {
 
     internal init(_ connection: XPCConnection) {
         self.connection = connection
-        self.connectionQueue = DispatchQueue(label: "com.apple.CloudBoardAsyncXPC.CloudBoardXPCConnection.queue")
+        self.connectionQueue = DispatchQueue(
+            label: "com.apple.CloudBoardAsyncXPC.CloudBoardXPCConnection.queue",
+            qos: .userInteractive
+        )
         self.nonPostedMessageHandlers = [:]
         self.logger = Logger(subsystem: "com.apple.CloudBoardAsyncXPC", category: "CloudBoardXPCConnection")
         self.name = connection.name
@@ -201,18 +204,28 @@ public actor CloudBoardAsyncXPCConnection: Identifiable {
     @discardableResult
     public func send<Message>(_ message: Message) async throws -> Message.Success
     where Message: CloudBoardAsyncXPCMessage {
-        try await self._send(message)
+        let interval = Signposter.signposter.beginInterval("Send", "\(self.connection.name)")
+        defer {
+            Signposter.signposter.endInterval("Send", interval)
+        }
+        return try await self._send(message)
     }
 
     /// Send a non-posted message without response data.
     public func send<Message>(_ message: Message) async throws
     where Message: CloudBoardAsyncXPCMessage, Message.Success == ExplicitSuccess {
+        let interval = Signposter.signposter.beginInterval("Send", "\(self.connection.name)")
+        defer {
+            Signposter.signposter.endInterval("Send", interval)
+        }
         _ = try await self._send(message)
     }
 
     private func _send<Message: CloudBoardAsyncXPCMessage>(_ message: Message) async throws -> Message.Success {
-        let encoder = XPCObjectEncoder()
-        let encodedMessage = try encoder.encode(message)
+        let encodedMessage = try Signposter.signposter.withIntervalSignpost("XPC Encode") {
+            let encoder = XPCObjectEncoder()
+            return try encoder.encode(message)
+        }
 
         var dict = XPCDictionary()
         dict[kMessageTypeKey] = String(describing: Message.self)
@@ -220,7 +233,9 @@ public actor CloudBoardAsyncXPCConnection: Identifiable {
 
         return try await withCheckedThrowingContinuation { continuation in
             let replyLock = NSLock()
+            let interval = Signposter.signposter.beginInterval("Send encoded", "\(self.connection.name)")
             self.connection.sendMessageWithReply(dict, self.connectionQueue) { object in
+                Signposter.signposter.endInterval("Send encoded", interval)
                 do {
                     // NSLock life-time is limited to individual send method call,
                     // thus the lock in never unlocked once it's locked. It's a replacement for
@@ -241,6 +256,10 @@ public actor CloudBoardAsyncXPCConnection: Identifiable {
     /// Send a posted message.
     public func send<Message: CloudBoardAsyncXPCMessage>(_ message: Message) throws where Message.Success == Never,
     Message.Failure == Never {
+        let interval = Signposter.signposter.beginInterval("Post", "\(self.connection.name)")
+        defer {
+            Signposter.signposter.endInterval("Post", interval)
+        }
         let encoder = XPCObjectEncoder()
         let encodedMessage = try encoder.encode(message)
 
@@ -290,8 +309,10 @@ extension CloudBoardAsyncXPCConnection {
             handler: @Sendable @escaping (Message) async throws -> Message.Success
         ) {
             self.handlers[String(describing: Message.self)] = { encodedMessage in
-                let decoder = XPCObjectDecoder()
-                let message = try decoder.decode(Message.self, from: encodedMessage)
+                let message = try Signposter.signposter.withIntervalSignpost("XPC handler decode") {
+                    let decoder = XPCObjectDecoder()
+                    return try decoder.decode(Message.self, from: encodedMessage)
+                }
 
                 let reply: Message.Reply
                 do {
@@ -301,8 +322,10 @@ extension CloudBoardAsyncXPCConnection {
                     reply = .failure(error)
                 }
 
-                let encoder = XPCObjectEncoder()
-                let encodedReply = try encoder.encode(reply)
+                let encodedReply = try Signposter.signposter.withIntervalSignpost("XPC handler response encode") {
+                    let encoder = XPCObjectEncoder()
+                    return try encoder.encode(reply)
+                }
                 return encodedReply
             }
         }

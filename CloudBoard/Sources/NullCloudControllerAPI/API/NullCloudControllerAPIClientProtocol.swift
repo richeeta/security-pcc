@@ -16,6 +16,7 @@
 
 import CloudBoardController
 
-public protocol NullCloudControllerAPIClientToServerProtocol: AnyActor, Sendable {
+public protocol NullCloudControllerAPIClientToServerProtocol: Actor {
     func updateState(state: WorkloadControllerState) async throws -> String
+    func restartPrewarmedInstances() async throws
 }

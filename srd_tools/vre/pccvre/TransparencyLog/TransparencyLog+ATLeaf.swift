@@ -32,6 +32,9 @@ extension TransparencyLog {
         let rawData: Data
         let metadata: Data
 
+        // isExpired yields true if leaf node expiration has passed current time
+        var isExpired: Bool { nodeData.expiryMs / 1000 <= UInt64(Date().timeIntervalSince1970) }
+
         init?(nodeType: TxPB_NodeType,
               nodeBytes: Data,
               index: UInt64,
@@ -64,7 +67,6 @@ extension TransparencyLog {
         }
 
         init?(_ leaf: TxPB_LogLeavesResponse.Leaf) {
-            
             self.init(
                 nodeType: leaf.nodeType,
                 nodeBytes: leaf.nodeBytes,
@@ -105,7 +107,7 @@ extension TransparencyLog {
          }
          */
         static func decodeNodeData(_ data: Data) throws -> ATLeafData {
-            let changeLogNode = try TxPB_ChangeLogNodeV2(serializedData: data)
+            let changeLogNode = try TxPB_ChangeLogNodeV2(serializedBytes: data)
             var nodeBytes = TransparencyByteBuffer(data: changeLogNode.mutation)
             return try ATLeafData(bytes: &nodeBytes)
         }

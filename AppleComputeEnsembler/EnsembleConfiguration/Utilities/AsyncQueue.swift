@@ -27,9 +27,6 @@
 /// ordering guarantees to asynchronous code. Internally `AsyncQueue` manages an
 /// async stream of work items, items are dequeued in the order they were
 /// enqueued and are executed sequentially.
-///
-/// See the associated discussion on slack for further details:
-/// https://a1450550.slack.com/archives/CHV18TNRW/p1638913582392500
 public actor AsyncQueue {
 	/// An item of work to run asynchronously with the calling context.
 	public typealias WorkItem = @Sendable () async -> Void

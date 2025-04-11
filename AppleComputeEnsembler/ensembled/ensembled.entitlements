@@ -61,6 +61,8 @@
     </array>
     <key>com.apple.security.exception.sysctl.read-only</key>
     <array>
+        <string>security.mac.amfi.restricted_execution_mode_status</string>
+        <string>security.mac.amfi.developer_mode_status</string>
         <string>kern.bootsessionuuid</string>
         <string>kern.osreleasetype</string>
         <string>net.routetable.0.0.3.0</string>

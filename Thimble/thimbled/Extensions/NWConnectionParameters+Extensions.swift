@@ -25,7 +25,12 @@ import PrivateCloudCompute
 
 extension NWParameters {
     /// A set of default parameters for a connection that listens on tcp using tls and http.
-    static func makeTLSAndHTTPParameters(ignoreCertificateErrors: Bool, forceOHTTP: Bool, bundleIdentifier: String? = nil) -> NWParameters {
+    static func makeTLSAndHTTPParameters(
+        ignoreCertificateErrors: Bool,
+        forceOHTTP: Bool,
+        useCompression: Bool,
+        bundleIdentifier: String? = nil
+    ) -> NWParameters {
         let parameters = NWParameters.tcp
         let tls = NWProtocolTLS.Options()
         let http = NWProtocolHTTP.Options()
@@ -42,8 +47,8 @@ extension NWParameters {
             sec_protocol_options_set_verify_block(
                 tls.securityProtocolOptions,
                 { metadata, trust, complete in
-                    let logger = tc2Logger(forCategory: .Network)
-                    logger.warning("not verifying certificate \(metadata.description)")
+                    let logger = tc2Logger(forCategory: .network)
+                    logger.error("not verifying certificate \(String(describing: metadata))")
                     complete(true)
                 }, .main)
         }
@@ -52,6 +57,12 @@ extension NWParameters {
             http,
             tls,
         ]
+
+        if useCompression {
+            let compression = NWProtocolHTTPEncoding.Options()
+            parameters.defaultProtocolStack.applicationProtocols.insert(compression, at: 0)
+        }
+
         return parameters
     }
 }

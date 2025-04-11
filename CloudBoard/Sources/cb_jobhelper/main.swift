@@ -16,5 +16,6 @@
 
 import CloudBoardJobHelperCore
 
-let daemon = CloudBoardJobHelper()
+let configuration = try CBJobHelperConfiguration.fromPreferences()
+let daemon = CloudBoardJobHelper(configuration: configuration)
 try await daemon.start()

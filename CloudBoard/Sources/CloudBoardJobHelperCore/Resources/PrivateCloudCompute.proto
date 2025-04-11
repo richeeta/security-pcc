@@ -18,6 +18,7 @@ package com.apple.privatecloudcompute.api.v1;
 
 option java_multiple_files = true;
 option java_package = "com.apple.privatecloudcompute.api.v1";
+option swift_prefix="Proto_PrivateCloudCompute_";
 
 message PrivateCloudComputeRequest {
   reserved 2;

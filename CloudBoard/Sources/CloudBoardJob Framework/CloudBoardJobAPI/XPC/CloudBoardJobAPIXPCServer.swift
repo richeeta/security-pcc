@@ -13,6 +13,7 @@
 // 10/02/2024
 
 import CloudBoardAsyncXPC
+
 //  Copyright © 2023 Apple Inc. All rights reserved.
 import Foundation
 import os
@@ -78,7 +79,7 @@ CloudBoardJobAPIServerToClientProtocol {
     }
 
     // Common helper for the functions above that send a WorkloadResponse.
-    private func sendWorkloadResponse(_ response: WorkloadResponse) async throws {
+    private func sendWorkloadResponse(_ response: CloudAppResponse) async throws {
         try await self.listener.broadcast(CloudBoardJobAPIXPCServerToClientMessage.ProvideOutput(response: response))
     }
 }

@@ -16,9 +16,9 @@ import CloudAttestation
 @_exported import CloudMetricsFramework
 import CryptoKit
 import Foundation
+import notify
 import os
 import OSPrivate.os.transactionPrivate // Make the Ensembler dirty
-import notify
 
 @_spi(Daemon) import Ensemble // Helper functions
 
@@ -30,24 +30,23 @@ let kSkipDarwinInitCheckPreferenceKey = "SkipDarwinInitCheck"
 // MARK: - Ensembler
 
 internal enum DerivedKeyType: CustomStringConvertible {
-    
-    case MeshEncryption
-    case TlsPsk
-    case KeyConfirmation(String)
-    case TestEncryptDecrypt
-    
-    var description: String {
-        switch(self) {
-        case .MeshEncryption:
-            return "ensembled-mesh-encryption"
-        case .TlsPsk:
-            return "ensembled-tls-psk"
-        case .KeyConfirmation(let nodeUDID):
-            return "ensembled-key-confirmation-\(nodeUDID)"
-        case .TestEncryptDecrypt:
-            return "ensembled-test-encrypt-decrypt"
-        }
-    }
+	case MeshEncryption
+	case TlsPsk
+	case KeyConfirmation(String)
+	case TestEncryptDecrypt
+
+	var description: String {
+		switch self {
+		case .MeshEncryption:
+			return "ensembled-mesh-encryption"
+		case .TlsPsk:
+			return "ensembled-tls-psk"
+		case .KeyConfirmation(let nodeUDID):
+			return "ensembled-key-confirmation-\(nodeUDID)"
+		case .TestEncryptDecrypt:
+			return "ensembled-test-encrypt-decrypt"
+		}
+	}
 }
 
 public func initCloudMetricsFrameworkBackend() {
@@ -59,7 +58,7 @@ private func handleStateTransition(
 	isLeader: Bool,
 	rank: Int,
 	chassisID: String,
-    nodeCnt: Int
+	nodeCnt: Int
 ) {
 	Ensembler.logger.info("Exporting metrics")
 
@@ -71,7 +70,7 @@ private func handleStateTransition(
 			("is_leader", "\(isLeader)"),
 			("rank", "\(rank)"),
 			("chassisID", chassisID),
-            ("nodeCount", "\(nodeCnt)"),
+			("nodeCount", "\(nodeCnt)"),
 		]
 	)
 	counter.increment()
@@ -82,7 +81,7 @@ private func handleStateTransition(
 		isLeader: isLeader,
 		rank: rank,
 		chassisID: chassisID,
-        nodeCnt: nodeCnt
+		nodeCnt: nodeCnt
 	)
 
 	Ensembler.logger.info("Done exporting metrics.")
@@ -137,7 +136,7 @@ private func updateCurrentStateCountGaugeMetrics(
 	isLeader: Bool,
 	rank: Int,
 	chassisID: String,
-    nodeCnt: Int
+	nodeCnt: Int
 ) {
 	updateGenericStateGaugeCounter(currentState: newState) { state in
 		Gauge(
@@ -147,7 +146,7 @@ private func updateCurrentStateCountGaugeMetrics(
 				("is_leader", "\(isLeader)"),
 				("rank", "\(rank)"),
 				("chassisID", chassisID),
-                ("nodeCount", "\(nodeCnt)"),
+				("nodeCount", "\(nodeCnt)"),
 			]
 		)
 	}
@@ -191,26 +190,24 @@ public class Ensembler {
 	private var plainTextUUID = UUID().uuidString
 	static let logger = Logger(subsystem: kEnsemblerPrefix, category: "Ensembler")
 
-	// TODO: This class can be referenced before this is initialized; gross
 	private var router: Router?
 	private var backend: Backend?
 
 	public var status: EnsemblerStatus {
-		get {
-			return self.stateMachine.state
-		}
+		return self.stateMachine.state
 	}
+
 	private var stateMachine: any StateMachine
 
 	private var _draining = false
 	public var draining: Bool {
 		get {
-			return drainingQ.sync {
+			return self.drainingQ.sync {
 				return self._draining
 			}
 		}
 		set {
-			drainingQ.sync {
+			self.drainingQ.sync {
 				self._draining = newValue
 			}
 		}
@@ -219,7 +216,7 @@ public class Ensembler {
 	private var useStubAttestation: Bool
 	private var cloudAttestation: Attestation?
 	private var sharedKey: SymmetricKey?
-    private var initialSharedkey: SymmetricKey?
+	private var initialSharedkey: SymmetricKey?
 	let maxControlMsgSize = 2048
 	var dataMap: [String: Data] = [:]
 
@@ -245,14 +242,14 @@ public class Ensembler {
 			nodeCnt: self.nodeMap.count
 		)
 
-		//post a notification for entering to ready and failed state
-		if (state == .ready) {
+		// post a notification for entering to ready and failed state
+		if state == .ready {
 			Ensembler.logger.info(
 				"Posting notifiication: \(kEnsembleStatusReadyEventName)"
 			)
 			notify_post(kEnsembleStatusReadyEventName)
 		}
-		if (state.inFailedState()) {
+		if state.inFailedState() {
 			Ensembler.logger.info(
 				"Posting notifiication: \(kEnsembleStatusFailedEventName)"
 			)
@@ -335,7 +332,7 @@ public class Ensembler {
 			"Initalizing ensembler: imTheBoss: \(self.imTheBoss, privacy: .public)"
 		)
 
-		for rank in 0..<self.ensembleConfig.nodes.count {
+		for rank in 0 ..< self.ensembleConfig.nodes.count {
 			if rank == self.currentNodeConfig.rank {
 				self.slots.append(Util.slot())
 			} else {
@@ -431,14 +428,14 @@ public class Ensembler {
 			delegate: self
 		)
 
-		switch (self.ensembleConfig.nodes.count) {
-		case(1):
+		switch self.ensembleConfig.nodes.count {
+		case 1:
 			Ensembler.logger.info("Initalizing ensembler: 1-node ensemble: Skip router creation")
-		case (2):
+		case 2:
 			self.router = try Router2(configuration: routerConfiguration)
-		case (4):
+		case 4:
 			self.router = try Router4(configuration: routerConfiguration)
-		case (8):
+		case 8:
 			self.router = try Router8Hypercube(configuration: routerConfiguration)
 		default:
 			Ensembler.logger.error(
@@ -616,8 +613,6 @@ public class Ensembler {
 				// rebooting and install the "[ACDC|Trusted] Support" cryptex.
 				try backend.activate()
 			} else if self.autoRestart {
-				// TODO: rdar://123743845 (Auto restart should check isActivate() when it becomes available)
-				// TODO: And looking at the surrounding code, the check above should also check it.
 				Ensembler.logger.error(
 					"""
 					The ensemble has already been activated. Attempting to auto-restart it. \
@@ -674,8 +669,8 @@ public class Ensembler {
 			)
 			return
 		}
-        // regenerate the plainttextuuid for each rotate operation
-        plainTextUUID = UUID().uuidString
+		// regenerate the plainttextuuid for each rotate operation
+		self.plainTextUUID = UUID().uuidString
 		guard let cloudAttestation = self.cloudAttestation else {
 			Ensembler.logger.error("Oops: No CAF object. This should never happen!")
 			throw InitializationError.unexpectedBehavior(
@@ -710,18 +705,18 @@ public class Ensembler {
 				"Oops: Cannot encrypt before initializing the shared key!"
 			)
 		}
-        
-        guard let keyData = try self.backend?.getCryptoKey() else {
-            throw InitializationError.unexpectedBehavior(
-                "Oops: Error getting crypt key!"
-            )
-        }
-        
-        // The key we get from CIOMesh is already a derived key,
-        // we are deriving a new key from the derived key here.
-        let encryptKey = SymmetricKey(data: keyData)
-        let derivedKey = try getDerivedKey(baseKey: encryptKey, type: .TestEncryptDecrypt)
-       
+
+		guard let keyData = try self.backend?.getCryptoKey() else {
+			throw InitializationError.unexpectedBehavior(
+				"Oops: Error getting crypt key!"
+			)
+		}
+
+		// The key we get from CIOMesh is already a derived key,
+		// we are deriving a new key from the derived key here.
+		let encryptKey = SymmetricKey(data: keyData)
+		let derivedKey = try getDerivedKey(baseKey: encryptKey, type: .TestEncryptDecrypt)
+
 		return try encrypt(data: data, sharedKey: derivedKey)
 	}
 
@@ -731,46 +726,46 @@ public class Ensembler {
 				"Oops: Cannot decrypt before initializing the shared key!"
 			)
 		}
-        
-        guard let keyData = try self.backend?.getCryptoKey() else {
-            throw InitializationError.unexpectedBehavior(
-                "Oops: Error getting crypt key!"
-            )
-        }
-        // The key we get from CIOMesh is already a derived key,
-        // we are deriving a new key from the derived key here.
-        let decryptKey = SymmetricKey(data: keyData)
-        let derivedKey = try getDerivedKey(baseKey: decryptKey, type: .TestEncryptDecrypt)
-        
+
+		guard let keyData = try self.backend?.getCryptoKey() else {
+			throw InitializationError.unexpectedBehavior(
+				"Oops: Error getting crypt key!"
+			)
+		}
+		// The key we get from CIOMesh is already a derived key,
+		// we are deriving a new key from the derived key here.
+		let decryptKey = SymmetricKey(data: keyData)
+		let derivedKey = try getDerivedKey(baseKey: decryptKey, type: .TestEncryptDecrypt)
+
 		return try decrypt(data: data, sharedKey: derivedKey)
 	}
-    
-    public func getAuthCode(data: Data) throws -> Data {
-        
-        // we will be using the initial shared key. This key will not be updated on rotation.
-        guard let sharedKey = self.initialSharedkey else {
-            throw EnsembleError.internalError(error: "Cannot generate Authcode since initialSharedkey is nil")
-        }
-        
-        // use the HKDF-SHA384 derived key
-        let derivedKey = try getDerivedKey(baseKey: sharedKey, type: .TlsPsk)
-        
-        let authenticationCode = HMAC<SHA256>.authenticationCode(for: data, using: derivedKey)
 
-        let authenticationData = authenticationCode.withUnsafeBytes {
+	public func getAuthCode(data: Data) throws -> Data {
+		// we will be using the initial shared key. This key will not be updated on rotation.
+		guard let sharedKey = self.initialSharedkey else {
+			throw EnsembleError
+				.internalError(error: "Cannot generate Authcode since initialSharedkey is nil")
+		}
+
+		// use the HKDF-SHA384 derived key
+		let derivedKey = try getDerivedKey(baseKey: sharedKey, type: .TlsPsk)
+
+		let authenticationCode = HMAC<SHA256>.authenticationCode(for: data, using: derivedKey)
+
+		let authenticationData = authenticationCode.withUnsafeBytes {
 			return Data($0)
-        }
-        
-        return authenticationData
-    }
-    
-    public func getMaxBuffersPerKey() throws -> UInt64? {
-        return try self.backend?.getMaxBuffersPerKey()
-    }
+		}
 
-    public func getMaxSecondsPerKey() throws -> UInt64? {
-        return try self.backend?.getMaxSecondsPerKey()
-    }
+		return authenticationData
+	}
+
+	public func getMaxBuffersPerKey() throws -> UInt64? {
+		return try self.backend?.getMaxBuffersPerKey()
+	}
+
+	public func getMaxSecondsPerKey() throws -> UInt64? {
+		return try self.backend?.getMaxSecondsPerKey()
+	}
 
 	/// Deactivate the mesh in the underlying backend
 	/// This function should NOOP if mesh is already deactivated
@@ -960,47 +955,47 @@ extension Ensembler: BackendDelegate {
 				)
 			}
 
-            // store the key in initialSharedkey for use in TLS PSK Options.
-            // this initialSharedkey will not be updated on rotation.
-            if self.initialSharedkey == nil {
-                self.initialSharedkey = self.sharedKey
-            }
-            
-            // use the HKDF-SHA384 derived key
-            let derivedKey = try getDerivedKey(baseKey: sharedKey, type: .MeshEncryption)
-            
+			// store the key in initialSharedkey for use in TLS PSK Options.
+			// this initialSharedkey will not be updated on rotation.
+			if self.initialSharedkey == nil {
+				self.initialSharedkey = self.sharedKey
+			}
+
+			// use the HKDF-SHA384 derived key
+			let derivedKey = try getDerivedKey(baseKey: sharedKey, type: .MeshEncryption)
+
 			var keyData = derivedKey.withUnsafeBytes {
 				return Data(Array($0))
 			}
 
-            defer {
-                keyData.withUnsafeMutableBytes { keyPtr in
-                    guard let baseAddress = keyPtr.baseAddress.self else {
-                        Ensembler.logger.error(
-                            """
-                            Failed to clear key data: Failed to get base address of key data
-                            """
-                        )
-                        return
-                    }
-                    
-                    guard 0 == memset_s(baseAddress, keyPtr.count, 0, keyPtr.count) else {
-                        Ensembler.logger.error(
-                            """
-                            Failed to clear key data: memset_s failed
-                            """
-                        )
-                        return
-                    }
-                }
-                Ensembler.logger.info(
-                    """
-                    Ensembler.setCryptoKey(): \
-                    Succcessfully cleared the keydata
-                    """
-                )
-            }
-            
+			defer {
+				keyData.withUnsafeMutableBytes { keyPtr in
+					guard let baseAddress = keyPtr.baseAddress.self else {
+						Ensembler.logger.error(
+							"""
+							Failed to clear key data: Failed to get base address of key data
+							"""
+						)
+						return
+					}
+
+					guard memset_s(baseAddress, keyPtr.count, 0, keyPtr.count) == 0 else {
+						Ensembler.logger.error(
+							"""
+							Failed to clear key data: memset_s failed
+							"""
+						)
+						return
+					}
+				}
+				Ensembler.logger.info(
+					"""
+					Ensembler.setCryptoKey(): \
+					Succcessfully cleared the keydata
+					"""
+				)
+			}
+
 			Ensembler.logger.info("Ensembler.setCryptoKey(): Call backend.setCryptoKey()")
 			try self.backend?.setCryptoKey(key: keyData, flags: 0)
 			Ensembler.logger.info(
@@ -1027,7 +1022,8 @@ extension Ensembler: BackendDelegate {
 	private func handlePairNode(udid: String, attestation: String) {
 		let status = self.status
 		self.attestationAsyncQueue.async {
-			guard status == .attesting || status == .keyRotationAttesting, self.nodeMap[udid]?.found == true else {
+			guard status == .attesting || status == .keyRotationAttesting,
+			      self.nodeMap[udid]?.found == true else {
 				Ensembler.logger.error(
 					"Ensembler.handlePairNode(): Handling extraneous message from UDID \(udid)"
 				)
@@ -1114,7 +1110,8 @@ extension Ensembler: BackendDelegate {
 	private func handleAnnounceSharedKey(udid: String, encryptedMsg: Data) {
 		Ensembler.logger.info("Ensembler.handleAnnounceSharedKey(udid: \(udid))")
 		let status = self.status
-		guard status == .attesting || status == .keyRotationAttesting, self.nodeMap[udid]?.found == true else {
+		guard status == .attesting || status == .keyRotationAttesting,
+		      self.nodeMap[udid]?.found == true else {
 			Ensembler.logger.error(
 				"""
 				Ensembler.handleAnnounceSharedKey(): \
@@ -1142,13 +1139,13 @@ extension Ensembler: BackendDelegate {
 
 		self.nodeMap[udid]?.keyShared = true
 		do {
-            // use the HKDF-SHA384 derived key
-            let derivedKey = try getDerivedKey(baseKey: sharedKey, type: .KeyConfirmation(udid))
-            
+			// use the HKDF-SHA384 derived key
+			let derivedKey = try getDerivedKey(baseKey: sharedKey, type: .KeyConfirmation(udid))
+
 			// verify if leader can decrypt the message sent my follower and if the plaintext is
 			// same as what leader sent
 			let decryptedData = try decrypt(data: encryptedMsg, sharedKey: derivedKey)
-            
+
 			let decryptedText = String(decoding: decryptedData, as: UTF8.self)
 			if self.plainTextUUID != decryptedText {
 				Ensembler.logger.error(
@@ -1332,19 +1329,22 @@ extension Ensembler: BackendDelegate {
 	}
 
 	public func checkConnectivity() throws -> [String] {
-		if self.nodeMap.count != 8 {
-			throw InitializationError.unexpectedBehavior(
-				"""
-				Oops: Cable diagnostics only supported for an 8-node ensemble. \
-				Current ensemble is \(self.nodeMap.count) nodes.
-				"""
-			)
-		}
+		var diagnostics: [String] = []
 
 		// When all nodes have established a connection with each other then the connection is
 		// assumed to be good.
 		guard !self.everyoneFound else {
 			return []
+		}
+
+		if self.nodeMap.count != 8 {
+			diagnostics.append(
+				"""
+				Skipping cable diagnostics ... \
+				Current ensemble is \(self.nodeMap.count) nodes.
+				"""
+			)
+			return diagnostics
 		}
 
 		guard let backend = self.backend else {
@@ -1408,8 +1408,6 @@ extension Ensembler: BackendDelegate {
 			expectedPartners[i] = expectedPartner
 			actualPartners[i] = actualPartner
 		}
-
-		var diagnostics: [String] = []
 
 		if !cableStatus[0] || !cableStatus[2] {
 			diagnostics.append("PortB Cable not functioning")
@@ -1487,10 +1485,12 @@ extension Ensembler: BackendDelegate {
 			defer {
 				dispatchGroup.leave()
 			}
-			self.channelChangeInternal(node: node,
-									   chassis: chassis,
-									   channelIndex: channelIndex,
-									   connected: connected)
+			self.channelChangeInternal(
+				node: node,
+				chassis: chassis,
+				channelIndex: channelIndex,
+				connected: connected
+			)
 		}
 		dispatchGroup.wait()
 	}
@@ -1548,18 +1548,22 @@ extension Ensembler: BackendDelegate {
 			defer {
 				dispatchGroup.leave()
 			}
-			self.connectionChangeInternal(direction: direction,
-										  node: node,
-										  channelIndex: channelIndex,
-										  connected: connected)
+			self.connectionChangeInternal(
+				direction: direction,
+				node: node,
+				channelIndex: channelIndex,
+				connected: connected
+			)
 		}
 		dispatchGroup.wait()
 	}
 
-	private func incomingMessageForLeader(node: Int,
-										  controlMsg: EnsembleControlMessage,
-										  sender: [String: NodeConfiguration].Element) {
-		switch(controlMsg) {
+	private func incomingMessageForLeader(
+		node _: Int,
+		controlMsg: EnsembleControlMessage,
+		sender: [String: NodeConfiguration].Element
+	) {
+		switch controlMsg {
 		case .announceNode(let slot):
 			self.slots[sender.value.rank] = slot
 			self.handleNewNode(udid: sender.key)
@@ -1580,16 +1584,18 @@ extension Ensembler: BackendDelegate {
 		}
 	}
 
-	private func incomingMessageForFollower(node: Int,
-											controlMsg: EnsembleControlMessage,
-											sender: [String: NodeConfiguration].Element) throws {
-		switch(controlMsg) {
+	private func incomingMessageForFollower(
+		node _: Int,
+		controlMsg: EnsembleControlMessage,
+		sender: [String: NodeConfiguration].Element
+	) throws {
+		switch controlMsg {
 		case .acceptNode:
 			if !self.setStatus(.accepted) {
 				throw EnsembleError.illegalStateTransition
 			}
 		case .ensembleComplete(let slots):
-			if !self.setStatus(.pairing) {throw EnsembleError.illegalStateTransition }
+			if !self.setStatus(.pairing) { throw EnsembleError.illegalStateTransition }
 			self.everyoneFound = true
 			self.slots = slots
 			self.dumpEnsembleDebugMap()
@@ -1600,10 +1606,12 @@ extension Ensembler: BackendDelegate {
 			}
 			pairWithLeader()
 		case .completePairing(let attestation, let pairingData, let message):
-			handleCompletePairing(udid: sender.key,
-								  attestation: attestation,
-								  pairingData: pairingData,
-								  message: message)
+			handleCompletePairing(
+				udid: sender.key,
+				attestation: attestation,
+				pairingData: pairingData,
+				message: message
+			)
 		case .acceptSharedKey:
 			if !self.setStatus(.keyAccepted) {
 				throw EnsembleError.illegalStateTransition
@@ -1650,7 +1658,7 @@ extension Ensembler: BackendDelegate {
 			"""
 		)
 
-		switch(controlMsg) {
+		switch controlMsg {
 		// Generic operations
 		case .ForwardMessage(let forward):
 			self.router?.forwardMessage(forward)
@@ -1663,7 +1671,7 @@ extension Ensembler: BackendDelegate {
 			)
 		case .ensembleDraining:
 			self.draining = true
-		case .bigMessageStart(_):
+		case .bigMessageStart:
 			self.dataMap[sender.key] = Data()
 		case .bigMessageChunk(let data):
 			self.dataMap[sender.key]?.append(data)
@@ -1685,9 +1693,11 @@ extension Ensembler: BackendDelegate {
 				if self.imTheBoss {
 					self.incomingMessageForLeader(node: node, controlMsg: controlMsg, sender: sender)
 				} else {
-					try self.incomingMessageForFollower(node: node,
-														controlMsg: controlMsg,
-														sender: sender)
+					try self.incomingMessageForFollower(
+						node: node,
+						controlMsg: controlMsg,
+						sender: sender
+					)
 				}
 			} catch {
 				Self.logger.error(
@@ -1757,7 +1767,8 @@ extension Ensembler: RouterDelegate {
 			do {
 				let attestationBundle = try await cloudAttestation.getAttestationBundle()
 				msg = try JSONEncoder().encode(EnsembleControlMessage.pairNode(
-					followerAttestation: attestationBundle.jsonString()))
+					followerAttestation: attestationBundle.jsonString()
+				))
 			} catch {
 				Ensembler.logger.error(
 					"""
@@ -1844,28 +1855,28 @@ extension Ensembler: RouterDelegate {
 				self.sharedKey = sharedKey
 
 				Ensembler.logger.info("Ensembler.handleCompletePairing(): Obtained shared key")
-                
-                Ensembler.logger.info(
-                    """
-                    Ensembler.handleCompletePairing(): Validating if the message is a UUID
-                    """
-                )
-                
-                guard let uuid = UUID(uuidString: message) else {
-                    Ensembler.logger.error("The message expected from leader is not of UUID format.")
-                    self.ensembleFailed()
-                    return
-                }
-                
+
+				Ensembler.logger.info(
+					"""
+					Ensembler.handleCompletePairing(): Validating if the message is a UUID
+					"""
+				)
+
+				guard let uuid = UUID(uuidString: message) else {
+					Ensembler.logger.error("The message expected from leader is not of UUID format.")
+					self.ensembleFailed()
+					return
+				}
+
 				guard let data = message.data(using: .utf8) else {
 					Ensembler.logger.error("Error converting message")
 					self.ensembleFailed()
 					return
 				}
 
-                // use the HKDF-SHA384 derived key
-                let derivedKey = try self.getDerivedKey(baseKey: sharedKey, type: .KeyConfirmation(self.UDID))
-                                                    
+				// use the HKDF-SHA384 derived key
+				let derivedKey = try self.getDerivedKey(baseKey: sharedKey, type: .KeyConfirmation(self.UDID))
+
 				let encryptedMsg = try self.encrypt(data: data, sharedKey: derivedKey)
 				Ensembler.logger.info(
 					"""
@@ -1875,7 +1886,8 @@ extension Ensembler: RouterDelegate {
 				)
 
 				let msg = try JSONEncoder().encode(
-					EnsembleControlMessage.announceSharedKey(encryptedText: encryptedMsg))
+					EnsembleControlMessage.announceSharedKey(encryptedText: encryptedMsg)
+				)
 				try self.sendBigControlMessage(node: 0, message: msg)
 
 				Ensembler.logger.info(
@@ -2094,25 +2106,29 @@ extension Ensembler: RouterDelegate {
 		}
 		self.coordinateEnsemble()
 	}
-    
-    private func getDerivedKey(baseKey: SymmetricKey, type: DerivedKeyType) throws -> SymmetricKey {
-        return try deriveKey(baseKey: baseKey, salt: "\(type)-salt", info: "\(type)-info")
-    }
-    
-    private func deriveKey(baseKey: SymmetricKey, salt: String, info: String ) throws -> SymmetricKey {
-        
-        guard let salt = salt.data(using: .utf8) else {
-            Ensembler.logger.error("Error forming salt from \(salt).")
-            throw  InitializationError.keyDerivationError("Error forming salt from \(salt).")
-        }
-        
-        guard let info = info.data(using: .utf8) else {
-            Ensembler.logger.error("Error forming info from \(info).")
-            throw  InitializationError.keyDerivationError("Error forming info from \(info).")
-        }
-        
-        let hkdfResultKey = HKDF<SHA384>.deriveKey(inputKeyMaterial: baseKey, salt: salt, info: info,  outputByteCount: 32)
-        
-        return hkdfResultKey
-    }
+
+	private func getDerivedKey(baseKey: SymmetricKey, type: DerivedKeyType) throws -> SymmetricKey {
+		return try self.deriveKey(baseKey: baseKey, salt: "\(type)-salt", info: "\(type)-info")
+	}
+
+	private func deriveKey(baseKey: SymmetricKey, salt: String, info: String) throws -> SymmetricKey {
+		guard let salt = salt.data(using: .utf8) else {
+			Ensembler.logger.error("Error forming salt from \(salt).")
+			throw InitializationError.keyDerivationError("Error forming salt from \(salt).")
+		}
+
+		guard let info = info.data(using: .utf8) else {
+			Ensembler.logger.error("Error forming info from \(info).")
+			throw InitializationError.keyDerivationError("Error forming info from \(info).")
+		}
+
+		let hkdfResultKey = HKDF<SHA384>.deriveKey(
+			inputKeyMaterial: baseKey,
+			salt: salt,
+			info: info,
+			outputByteCount: 32
+		)
+
+		return hkdfResultKey
+	}
 }

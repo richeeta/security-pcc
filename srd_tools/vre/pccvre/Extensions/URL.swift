@@ -43,4 +43,22 @@ extension URL {
 
         return self.init(string: string)
     }
+
+    var exists: Bool {
+        get async {
+            let session = URLSession.shared
+            var request = URLRequest(url: self)
+            request.httpMethod = "HEAD"
+
+            guard let (_, response) = try? await session.data(for: request) else {
+                return false
+            }
+
+            if let response = response as? HTTPURLResponse {
+                return response.statusCode == 200
+            }
+
+            return false
+        }
+    }
 }

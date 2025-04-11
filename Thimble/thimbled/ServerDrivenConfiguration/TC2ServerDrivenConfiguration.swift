@@ -20,8 +20,9 @@
 //
 
 import Foundation
+import OSLog
 import PrivateCloudCompute
-import os.lock
+import Synchronization
 
 package final class TC2ServerDrivenConfiguration: Sendable {
 
@@ -63,13 +64,13 @@ package final class TC2ServerDrivenConfiguration: Sendable {
 
     private static let filename = "serverdrivenconfiguration.json"
     private let decoder = tc2JSONDecoder()
-    private let logger = tc2Logger(forCategory: .ServerDrivenConfiguration)
+    private let logger = tc2Logger(forCategory: .serverDrivenConfiguration)
     private let file: URL?
-    private let _jsonModel: OSAllocatedUnfairLock<JsonModel>
+    private let _jsonModel: Mutex<JsonModel>
 
     package init() {
         self.file = nil
-        self._jsonModel = OSAllocatedUnfairLock(initialState: Self.load(Self.defaultJson, decoder: self.decoder, logger: self.logger))
+        self._jsonModel = Mutex(Self.load(Self.defaultJson, decoder: self.decoder, logger: self.logger))
 
         logger.debug("initialized server driven configuration")
     }
@@ -82,13 +83,19 @@ package final class TC2ServerDrivenConfiguration: Sendable {
         do {
             data = try Data(contentsOf: file)
         } catch {
-            logger.warning("persistence does not yet exist, or unable to read persisted server driven configuration, file=\(file), error=\(error)")
+            logger.log("persistence does not yet exist, or unable to read persisted server driven configuration, file=\(file), error=\(error)")
             data = Self.defaultJson
         }
 
-        self._jsonModel = OSAllocatedUnfairLock(initialState: Self.load(data, decoder: self.decoder, logger: self.logger))
+        self._jsonModel = Mutex(Self.load(data, decoder: self.decoder, logger: self.logger))
 
         logger.debug("initialized server driven configuration, file=\(file)")
+    }
+
+    static func migrate(from source: URL, to destination: URL) {
+        let sourceFile = source.appending(path: Self.filename)
+        let destinationFile = destination.appending(path: Self.filename)
+        moveDaemonStateFile(from: sourceFile, to: destinationFile)
     }
 
     private static func load(_ data: Data, decoder: JSONDecoder, logger: Logger) -> JsonModel {

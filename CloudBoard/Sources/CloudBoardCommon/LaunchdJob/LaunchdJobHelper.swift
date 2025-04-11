@@ -67,7 +67,7 @@ public enum LaunchdJobHelper {
 
         // If skippingInstances is set, we only return base job handles
         if skippingInstances, let instanceUUID = currentJobInfo.instance {
-            logger.error("skipping job instance with UUID: \(instanceUUID.uuidString, privacy: .public)")
+            logger.debug("skipping job instance with UUID: \(instanceUUID.uuidString, privacy: .public)")
             return nil
         }
 

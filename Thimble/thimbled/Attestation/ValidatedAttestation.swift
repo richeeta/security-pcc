@@ -39,20 +39,6 @@ struct ValidatedAttestation: Sendable, Hashable {
 
     /// Cell ID from CloudAttestation framework
     var validatedCellID: String?
-
-    init(
-        attestation: Attestation,
-        publicKey: Data,
-        attestationExpiry: Date,
-        uniqueNodeIdentifier: String?,
-        validatedCellID: String?
-    ) {
-        self.attestation = attestation
-        self.publicKey = publicKey
-        self.attestationExpiry = attestationExpiry
-        self.uniqueNodeIdentifier = uniqueNodeIdentifier
-        self.validatedCellID = validatedCellID
-    }
 }
 
 extension ValidatedAttestation {

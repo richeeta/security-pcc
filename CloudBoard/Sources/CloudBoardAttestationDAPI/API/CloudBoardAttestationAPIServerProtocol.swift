@@ -22,7 +22,7 @@ public protocol CloudBoardAttestationAPIServerProtocol: CloudBoardAttestationAPI
     func connect() async
 }
 
-public protocol CloudBoardAttestationAPIServerToClientProtocol: AnyActor, Sendable {
+public protocol CloudBoardAttestationAPIServerToClientProtocol: Actor {
     func keyRotated(newKeySet: AttestedKeySet) async throws
     func attestationRotated(newAttestationSet: AttestationSet) async throws
 }

@@ -33,8 +33,7 @@ extension CLI.ReleaseCmd {
         var overwrite: Bool = false
 
         @Option(name: [.customLong("release"), .customShort("R")],
-                help: "SW Release Log index, or path to release .json or .protobuf file.",
-                completion: .file())
+                help: "SW Release Log index, or path to release metadata .json or .protobuf file.")
         var release: String
 
         @Flag(name: [.customLong("skip-verify")],
@@ -48,7 +47,10 @@ extension CLI.ReleaseCmd {
             // assetHelper tracks downloaded assets and metadata (json) info
             var assetHelper: AssetHelper
             do {
-                assetHelper = try AssetHelper(directory: CLIDefaults.assetsDirectory.path)
+                assetHelper = try AssetHelper(
+                    directory: CLIDefaults.assetsDirectory.path,
+                    purgeable: !CLIDefaults.customAssetFolder
+                )
             } catch {
                 throw CLIError("\(CLIDefaults.assetsDirectory.path): \(error)")
             }
@@ -70,24 +72,24 @@ extension CLI.ReleaseCmd {
 
                 try await swlog.fetchReleases(
                     reqCount: 1,
-                    startWindow: Int64(releaseIndex),
-                    endWindow: UInt64(releaseIndex + 1)
+                    includeAll: true,
+                    searchRangeStart: Int64(releaseIndex),
+                    searchRangeEnd: UInt64(releaseIndex + 1)
                 )
 
-                guard swlog.count > 0 else {
+                guard let swrelease = swlog.last else {
                     throw CLIError("SW Release not found")
                 }
 
-                guard let relMetadata = swlog.last!.metadata else {
+                guard let relMetadata = swrelease.metadata else {
                     throw CLIError("SW Release metadata not found")
                 }
                 releaseMetadata = relMetadata
 
                 do {
-                    // release.json info always overwritten
-                    try assetHelper.addRelease(index: releaseIndex,
-                                               logEnvironment: logEnvironment,
-                                               releaseMetadata: releaseMetadata)
+                    // ticket & release files always overwritten
+                    try assetHelper.addRelease(release: swrelease,
+                                               logEnvironment: swlogOptions.environment)
                 } catch {
                     throw CLIError("Unable to save release information: \(error)")
                 }
@@ -108,20 +110,16 @@ extension CLI.ReleaseCmd {
                 throw ValidationError("must provide release index or release.json file pathname")
             }
 
-            guard let releaseAssets = releaseMetadata.assets else {
-                throw CLIError("No assets found in SW Release")
-            }
-
             // download assets not already onhand, doesn't match asset digest (in release.json),
             //  or when --overwrite specified
             let cryptexes = await CLI.ReleaseCmd.ReleaseDownloadCmd.fetchAssets(
                 assetHelper: assetHelper,
-                assets: releaseAssets,
+                assets: releaseMetadata.assets,
                 skipVerifier: skipVerifier,
                 overwrite: overwrite
             )
 
-            if cryptexes.count != releaseAssets.count {
+            if cryptexes.count != releaseMetadata.assets.count {
                 throw CLIError("did not retrieve all SW Release assets")
             }
 
@@ -171,7 +169,7 @@ extension CLI.ReleaseCmd {
                             let cryptex = try CryptexSpec(
                                 path: assetPath.path,
                                 variant: asset.variant,
-                                assetType: SWReleaseMetadata.assetTypeName(asset.type)
+                                assetType: asset.type.label
                             )
 
                             cryptexes.append(cryptex)
@@ -189,7 +187,7 @@ extension CLI.ReleaseCmd {
                                                                         verifier: assetVerifier)
                     try cryptexes.append(CryptexSpec(path: assetPath.path,
                                                      variant: asset.variant,
-                                                     assetType: SWReleaseMetadata.assetTypeName(asset.type)))
+                                                     assetType: asset.type.label))
                     print("SW release asset downloaded: \(assetPath.lastPathComponent)")
                 } catch {
                     CLI.logger.error("failed to download: \(error, privacy: .public)")

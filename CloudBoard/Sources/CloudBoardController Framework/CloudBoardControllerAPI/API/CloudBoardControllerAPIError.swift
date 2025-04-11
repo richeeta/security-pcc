@@ -16,7 +16,12 @@
 
 public enum CloudBoardControllerAPIError {
     case internalError
+    case unavailable
     case alreadyTransitioning(WorkloadControllerState)
+    case restartPrewarmedInvalidState(WorkloadControllerState)
+    case restartPrewarmedInProgress
+    case restartPrewarmedFailed
+    case unexpectedStateChange(WorkloadControllerState)
 }
 
 extension CloudBoardControllerAPIError: CustomStringConvertible {
@@ -24,8 +29,18 @@ extension CloudBoardControllerAPIError: CustomStringConvertible {
         switch self {
         case .internalError:
             "Internal error"
+        case .unavailable:
+            "API unavailable under current configuration"
         case .alreadyTransitioning(let state):
             "Already transitioning to state \(state)"
+        case .restartPrewarmedInvalidState(let state):
+            "Cannot restart prewarmed instances in state \(state)"
+        case .restartPrewarmedInProgress:
+            "Restart of prewarmed instances already in progress"
+        case .restartPrewarmedFailed:
+            "Restart of prewarmed instances failed"
+        case .unexpectedStateChange(let state):
+            "Unexpected state change to \(state)"
         }
     }
 }

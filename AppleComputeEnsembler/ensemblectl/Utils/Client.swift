@@ -24,159 +24,156 @@
 // There is no way to test this easily, and one way to rely on TIE team to test this for us.
 // Now with the client server, we get the tlsOptions from ensembled and use Network Framework APIs
 // to establish mtls communication between server and client.
-// To use it, run esenmblectl run-server <port> on a node, and on other node/nodes, run ensemblectl run-client <port> <server>
+// To use it, run esenmblectl run-server <port> on a node, and on other node/nodes, run ensemblectl
+// run-client <port> <server>
 import Foundation
 import Network
 
 class Client {
-    let connection: ClientConnection
-    let host: NWEndpoint.Host
-    let port: NWEndpoint.Port
-    
-    init(host: String, port: UInt16, tlsOptions: NWProtocolTLS.Options) {
-        self.host = NWEndpoint.Host(host)
-        self.port = NWEndpoint.Port(rawValue: port)!
-        
-        let tcpOptions = NWProtocolTCP.Options()
-        tcpOptions.enableKeepalive = true
-        tcpOptions.keepaliveIdle = 2
+	let connection: ClientConnection
+	let host: NWEndpoint.Host
+	let port: NWEndpoint.Port
 
-        
-        // Create parameters with custom TLS and TCP options.
-        let parameters = NWParameters(tls: tlsOptions, tcp: tcpOptions)
-        
-        let nwConnection = NWConnection(host: self.host, port: self.port, using: parameters)
-        connection = ClientConnection(nwConnection: nwConnection)
-    }
-    
-    func start() {
-        print("Client started \(host) \(port)")
-        connection.didStopCallback = didStopCallback(error:)
-        connection.start()
-    }
-    
-    func stop() {
-        connection.stop()
-    }
-    
-    func send(data: Data) {
-        connection.send(data: data)
-    }
-    
-    func didStopCallback(error: Error?) {
-        if error == nil {
-            exit(EXIT_SUCCESS)
-        } else {
-            exit(EXIT_FAILURE)
-        }
-    }
+	init(host: String, port: UInt16, tlsOptions: NWProtocolTLS.Options) {
+		self.host = NWEndpoint.Host(host)
+		self.port = NWEndpoint.Port(rawValue: port)!
+
+		let tcpOptions = NWProtocolTCP.Options()
+		tcpOptions.enableKeepalive = true
+		tcpOptions.keepaliveIdle = 2
+
+		// Create parameters with custom TLS and TCP options.
+		let parameters = NWParameters(tls: tlsOptions, tcp: tcpOptions)
+
+		let nwConnection = NWConnection(host: self.host, port: self.port, using: parameters)
+		self.connection = ClientConnection(nwConnection: nwConnection)
+	}
+
+	func start() {
+		print("Client started \(self.host) \(self.port)")
+		self.connection.didStopCallback = self.didStopCallback(error:)
+		self.connection.start()
+	}
+
+	func stop() {
+		self.connection.stop()
+	}
+
+	func send(data: Data) {
+		self.connection.send(data: data)
+	}
+
+	func didStopCallback(error: Error?) {
+		if error == nil {
+			exit(EXIT_SUCCESS)
+		} else {
+			exit(EXIT_FAILURE)
+		}
+	}
 }
 
 class ClientConnection {
-    
-    let  nwConnection: NWConnection
-    let queue = DispatchQueue(label: "Client connection Q")
-    
-    init(nwConnection: NWConnection) {
-        self.nwConnection = nwConnection
-    }
-    
-    var didStopCallback: ((Error?) -> Void)? = nil
-    
-    func start() {
-        print("connection will start")
-        nwConnection.stateUpdateHandler = stateDidChange(to:)
-        setupReceive()
-        nwConnection.start(queue: queue)
-    }
-    
-    private func stateDidChange(to state: NWConnection.State) {
-        switch state {
-        case .waiting(let error):
-            connectionDidFail(error: error)
-        case .ready:
-            print("Client connection ready")
-        case .failed(let error):
-            connectionDidFail(error: error)
-        default:
-            break
-        }
-    }
-    
-    private func setupReceive() {
-        nwConnection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { (data, _, isComplete, error) in
-            if let data = data, !data.isEmpty {
-                let message = String(data: data, encoding: .utf8)
-                print("connection did receive, data: \(data as NSData) string: \(message ?? "-" )")
-            }
-            if isComplete {
-                self.connectionDidEnd()
-            } else if let error = error {
-                self.connectionDidFail(error: error)
-            } else {
-                self.setupReceive()
-            }
-        }
-    }
-        
-    func send(data: Data) {
-        nwConnection.send(content: data, completion: .contentProcessed( { error in
-            if let error = error {
-                self.connectionDidFail(error: error)
-                return
-            }
-                print("connection did send, data: \(data as NSData)")
-        }))
-    }
-    
-    func stop() {
-        print("connection will stop")
-        stop(error: nil)
-    }
-    
-    private func connectionDidFail(error: Error) {
-        print("connection did fail, error: \(error)")
-        self.stop(error: error)
-    }
-    
-    private func connectionDidEnd() {
-        print("connection did end")
-        self.stop(error: nil)
-    }
-    
-    private func stop(error: Error?) {
-        self.nwConnection.stateUpdateHandler = nil
-        self.nwConnection.cancel()
-        if let didStopCallback = self.didStopCallback {
-            self.didStopCallback = nil
-            didStopCallback(error)
-        }
-    }
+	let nwConnection: NWConnection
+	let queue = DispatchQueue(label: "Client connection Q")
+
+	init(nwConnection: NWConnection) {
+		self.nwConnection = nwConnection
+	}
+
+	var didStopCallback: ((Error?) -> Void)?
+
+	func start() {
+		print("connection will start")
+		self.nwConnection.stateUpdateHandler = self.stateDidChange(to:)
+		self.setupReceive()
+		self.nwConnection.start(queue: self.queue)
+	}
+
+	private func stateDidChange(to state: NWConnection.State) {
+		switch state {
+		case .waiting(let error):
+			self.connectionDidFail(error: error)
+		case .ready:
+			print("Client connection ready")
+		case .failed(let error):
+			self.connectionDidFail(error: error)
+		default:
+			break
+		}
+	}
+
+	private func setupReceive() {
+		self.nwConnection
+			.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
+				if let data, !data.isEmpty {
+					let message = String(data: data, encoding: .utf8)
+					print("connection did receive, data: \(data as NSData) string: \(message ?? "-")")
+				}
+				if isComplete {
+					self.connectionDidEnd()
+				} else if let error {
+					self.connectionDidFail(error: error)
+				} else {
+					self.setupReceive()
+				}
+			}
+	}
+
+	func send(data: Data) {
+		self.nwConnection.send(content: data, completion: .contentProcessed { error in
+			if let error {
+				self.connectionDidFail(error: error)
+				return
+			}
+			print("connection did send, data: \(data as NSData)")
+		})
+	}
+
+	func stop() {
+		print("connection will stop")
+		self.stop(error: nil)
+	}
+
+	private func connectionDidFail(error: Error) {
+		print("connection did fail, error: \(error)")
+		self.stop(error: error)
+	}
+
+	private func connectionDidEnd() {
+		print("connection did end")
+		self.stop(error: nil)
+	}
+
+	private func stop(error: Error?) {
+		self.nwConnection.stateUpdateHandler = nil
+		self.nwConnection.cancel()
+		if let didStopCallback = self.didStopCallback {
+			self.didStopCallback = nil
+			didStopCallback(error)
+		}
+	}
 }
 
 func initClient(server: String, port: UInt16, tlsOptions: NWProtocolTLS.Options) {
-    let client = Client(host: server, port: port, tlsOptions: tlsOptions)
-    client.start()
-    while(true) {
-      var command = readLine(strippingNewline: true)
-      switch (command){
-      case "CRLF":
-          command = "\r\n"
-      case "RETURN":
-          command = "\n"
-      case "exit":
-          client.stop()
-      default:
-          break
-      }
-      client.connection.send(data: (command?.data(using: .utf8))!)
-    }
+	let client = Client(host: server, port: port, tlsOptions: tlsOptions)
+	client.start()
+	while true {
+		var command = readLine(strippingNewline: true)
+		switch command {
+		case "CRLF":
+			command = "\r\n"
+		case "RETURN":
+			command = "\n"
+		case "exit":
+			client.stop()
+		default:
+			break
+		}
+		client.connection.send(data: (command?.data(using: .utf8))!)
+	}
 }
 
-func runClient(server: String, port: UInt16,tlsOptions: NWProtocolTLS.Options)
-{
-    initClient(server: server, port: port, tlsOptions: tlsOptions)
-    RunLoop.current.run()
+func runClient(server: String, port: UInt16, tlsOptions: NWProtocolTLS.Options) {
+	initClient(server: server, port: port, tlsOptions: tlsOptions)
+	RunLoop.current.run()
 }
-
-

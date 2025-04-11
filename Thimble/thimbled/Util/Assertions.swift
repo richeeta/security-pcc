@@ -24,7 +24,7 @@ import IOKit.pwr_mgt
 import PrivateCloudCompute
 
 struct PowerAssertion: Sendable {
-    let logger = tc2Logger(forCategory: .Daemon)
+    let logger = tc2Logger(forCategory: .daemon)
     var assertionName: String
     var assertionId: IOPMAssertionID
 
@@ -34,7 +34,7 @@ struct PowerAssertion: Sendable {
     }
 
     mutating private func acquirePowerAssertion() {
-        logger.log("\(#function)")
+        logger.log("acquirePowerAssertion")
 
         var assertion = IOPMAssertionID(kIOPMNullAssertionID)
         let result = IOPMAssertionCreateWithDescription(
@@ -56,7 +56,7 @@ struct PowerAssertion: Sendable {
     }
 
     mutating private func releasePowerAssertion() {
-        logger.log("\(#function)")
+        logger.log("releasePowerAssertion")
 
         if self.assertionId != kIOPMNullAssertionID {
             IOPMAssertionRelease(assertionId)

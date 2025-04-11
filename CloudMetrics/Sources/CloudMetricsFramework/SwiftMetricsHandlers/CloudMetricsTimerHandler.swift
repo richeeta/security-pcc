@@ -19,32 +19,25 @@
 //  Created by Andrea Guzzo on 8/29/22.
 //
 
+internal import CloudMetricsConstants
+internal import CloudMetricsXPC
 import Foundation
 import os
 
-internal class CloudMetricsTimerHandler: TimerHandler {
+internal final class CloudMetricsTimerHandler: Sendable, TimerHandler {
     private let timer: CloudMetricsTimer
-    private let logger: Logger
-    private weak var cloudMetrics: CloudMetricsFactory?
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsTimerHandler")
+    private let metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation
 
-    internal init(cloudMetrics: CloudMetricsFactory, timer: CloudMetricsTimer) {
+    internal init(metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation,
+                  timer: CloudMetricsTimer) {
         self.timer = timer
-        self.logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsTimerHandler")
-        self.cloudMetrics = cloudMetrics
+        self.metricUpdateContinuation = metricUpdateContinuation
     }
 
     internal func recordNanoseconds(_ duration: Int64) {
         let timer = self.timer
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordNanoseconds(timer: timer, duration: duration, epoch: epoch)
-                } catch {
-                    logger.debug("Can't record nanoseconds for '\(timer.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordNanoseconds(.init(timer, duration: duration, epoch: epoch)))
     }
 }

@@ -30,6 +30,7 @@ public enum LocalCloudBoardGRPCClientError: Error {
     case statusCode(Int)
 }
 
+@available(*, deprecated, renamed: "PrivateCloudComputeResponse")
 public enum PrivateCloudComputeResponseMessage {
     case responseID(UUID)
     case payload(Data)
@@ -37,11 +38,20 @@ public enum PrivateCloudComputeResponseMessage {
     case unknown
 }
 
+public enum PrivateCloudComputeResponse {
+    case responseID(UUID)
+    case attestation(Data)
+    case payload(Data)
+    case summary(String)
+    case unknown
+}
+
+@available(*, deprecated, renamed: "LocalCloudBoardGRPCAsyncClient")
 public class LocalCloudBoardGRPCClient {
     typealias CloudBoardGrpcClient = Com_Apple_Cloudboard_Api_V1_CloudBoardNIOClient
     typealias FetchAttestationRequest = Com_Apple_Cloudboard_Api_V1_FetchAttestationRequest
-    typealias PrivateCloudComputeRequest = Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeRequest
-    typealias PrivateCloudComputeResponse = Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeResponse
+    typealias PrivateCloudComputeRequest = Proto_PrivateCloudCompute_PrivateCloudComputeRequest
+    typealias PrivateCloudComputeResponse = Proto_PrivateCloudCompute_PrivateCloudComputeResponse
 
     public static let logger: os.Logger = .init(
         subsystem: "com.apple.cloudos.cloudboard",
@@ -140,7 +150,7 @@ public class LocalCloudBoardGRPCClient {
                             isFinal: chunk.isFinal
                         )
                         if let chunkData = data.readLengthPrefixedChunk() {
-                            let pccResponse = try PrivateCloudComputeResponse(serializedData: chunkData)
+                            let pccResponse = try PrivateCloudComputeResponse(serializedBytes: chunkData)
                             let message: PrivateCloudComputeResponseMessage
                             switch pccResponse.type {
                             case .responseUuid(let uuidData):
@@ -236,6 +246,345 @@ public class LocalCloudBoardGRPCClient {
                 throw LocalCloudBoardGRPCClientError.failedToParseCloudAttestationBundle(error)
             }
         }
+    }
+}
+
+public class LocalCloudBoardGRPCAsyncClient {
+    typealias CloudBoardGrpcClient = Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncClient
+    typealias FetchAttestationRequest = Com_Apple_Cloudboard_Api_V1_FetchAttestationRequest
+    typealias PrivateCloudComputeRequest = Proto_PrivateCloudCompute_PrivateCloudComputeRequest
+    typealias PrivateCloudComputeResponse = Proto_PrivateCloudCompute_PrivateCloudComputeResponse
+
+    public static let logger: os.Logger = .init(
+        subsystem: "com.apple.cloudos.cloudboard",
+        category: "LocalCloudBoardClient"
+    )
+    private let attestationEnvironment: CloudAttestation.Environment
+    private var grpcClient: CloudBoardGrpcClient
+
+    public init(host: String, port: Int) {
+        self.attestationEnvironment = .dev
+        self.grpcClient = Self.getGrpcClient(host: host, port: port)
+    }
+
+    public init(host: String, port: Int, attestationEnvironment: String) {
+        self.attestationEnvironment = CloudAttestation.Environment(
+            rawValue: attestationEnvironment
+        ) ?? .dev
+        self.grpcClient = Self.getGrpcClient(host: host, port: port)
+    }
+
+    deinit {
+        _ = self.grpcClient.channel.close()
+    }
+
+    private static func getGrpcClient(
+        host: String,
+        port: Int
+    ) -> CloudBoardGrpcClient {
+        let group = PlatformSupport.makeEventLoopGroup(
+            loopCount: 1,
+            networkPreference: .userDefined(.networkFramework)
+        )
+        let queue = DispatchQueue(
+            label: "com.apple.LocalCloudBoardClient.Verification.queue",
+            qos: DispatchQoS.userInitiated
+        )
+        let channel = ClientConnection
+            .usingTLSBackedByNetworkFramework(on: group)
+            .withTLSHandshakeVerificationCallback(on: queue, verificationCallback: { _, _, verifyComplete in
+                verifyComplete(true)
+            })
+            .connect(host: host, port: port)
+        return CloudBoardGrpcClient(channel: channel)
+    }
+
+    @available(*, deprecated, renamed: "streamPrivateRequest")
+    public func submitPrivateRequest(payload: Data) async throws
+    -> LocalCloudboardClientResponse {
+        let pccAuthRequest = try PrivateCloudComputeRequest.serialized(with: .authToken(.init()))
+        let pccPayloadRequest = try PrivateCloudComputeRequest.serialized(with: .applicationPayload(payload))
+
+        // get the attestation
+        let attestationResponse = try await grpcClient.fetchAttestation(
+            FetchAttestationRequest()
+        )
+        let cloudOSNodePublicKeyID = attestationResponse.attestation.keyID
+        let (cloudOSNodePublicKey, bundleJson) = try await getPublicKeyFromAttestation(
+            attestationResponse.attestation
+                .attestationBundle
+        )
+
+        // create an ohttp request stream
+        var oHTTPClientStateMachine = OHTTPClientStateMachine()
+        let encapsulatedKey = try oHTTPClientStateMachine.encapsulateKey(
+            keyID: 1,
+            publicKey: cloudOSNodePublicKey,
+            ciphersuite: .Curve25519_SHA256_AES_GCM_128
+        )
+        let encapsulatedTGT = try oHTTPClientStateMachine.encapsulateMessage(
+            message: pccAuthRequest, isFinal: false
+        )
+        let encapuslatedPayload = try oHTTPClientStateMachine.encapsulateMessage(
+            message: pccPayloadRequest, isFinal: true
+        )
+
+        // submit workload
+        let stream = WorkloadAsyncClientStream(client: self.grpcClient)
+
+        let responses = stream.submitWorkload(
+            keyID: cloudOSNodePublicKeyID,
+            key: encapsulatedKey,
+            chunks: [encapsulatedTGT, encapuslatedPayload]
+        )
+
+        return LocalCloudboardClientResponse(
+            attestation: bundleJson,
+            oHTTPClientStateMachine: oHTTPClientStateMachine,
+            responseStream: responses
+        )
+    }
+
+    public func streamPrivateRequest(_ body: @escaping (
+        LocalCloudBoardClientRequestSender,
+        LocalCloudboardClientResponse
+    ) async throws -> Void) async throws {
+        // get the attestation
+        let attestationResponse = try await grpcClient.fetchAttestation(
+            FetchAttestationRequest()
+        )
+        let cloudOSNodePublicKeyID = attestationResponse.attestation.keyID
+        let (cloudOSNodePublicKey, bundleJson) = try await getPublicKeyFromAttestation(
+            attestationResponse.attestation
+                .attestationBundle
+        )
+
+        // create an ohttp request stream
+        var oHTTPClientStateMachine = OHTTPClientStateMachine()
+        let encapsulatedKey = try oHTTPClientStateMachine.encapsulateKey(
+            keyID: 1,
+            publicKey: cloudOSNodePublicKey,
+            ciphersuite: .Curve25519_SHA256_AES_GCM_128
+        )
+
+        let stream = WorkloadAsyncClientStream(client: self.grpcClient)
+        let (payloadChunkStream, payloadChunkContinuation) = AsyncStream.makeStream(of: Data.self)
+        let requestSender: LocalCloudBoardClientRequestSender =
+            .init(payloadChunkContinuation: payloadChunkContinuation)
+
+        let pccAuthRequest = try PrivateCloudComputeRequest.serialized(with: .authToken(.init()))
+        let encapsulatedTGT = try oHTTPClientStateMachine.encapsulateMessage(
+            message: pccAuthRequest, isFinal: false
+        )
+
+        try await stream
+            .submitWithAuthToken(
+                keyID: cloudOSNodePublicKeyID,
+                key: encapsulatedKey,
+                authToken: encapsulatedTGT
+            ) { payloadContinuation, responses in
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        for try await chunk in payloadChunkStream {
+                            let pccPayloadChunk = try PrivateCloudComputeRequest
+                                .serialized(with: .applicationPayload(chunk))
+                            let encapuslatedPayload = try oHTTPClientStateMachine.encapsulateMessage(
+                                message: pccPayloadChunk, isFinal: false
+                            )
+                            payloadContinuation.yield(InvokeWorkloadRequest.with {
+                                $0.requestChunk = Proto_Ropes_Common_Chunk.with {
+                                    $0.encryptedPayload = encapuslatedPayload
+                                    $0.isFinal = false
+                                }
+                            })
+                        }
+
+                        let pccFinalMessage = try PrivateCloudComputeRequest.serialized(with: .finalMessage(.init()))
+                        let encapuslatedFinalMessage = try oHTTPClientStateMachine.encapsulateMessage(
+                            message: pccFinalMessage, isFinal: true
+                        )
+                        payloadContinuation.yield(InvokeWorkloadRequest.with {
+                            $0.requestChunk = Proto_Ropes_Common_Chunk.with {
+                                $0.encryptedPayload = encapuslatedFinalMessage
+                                $0.isFinal = true
+                            }
+                        })
+                        payloadContinuation.finish()
+                    }
+                    group.addTask {
+                        try await body(
+                            requestSender,
+                            .init(
+                                attestation: bundleJson,
+                                oHTTPClientStateMachine: oHTTPClientStateMachine,
+                                responseStream: responses
+                            )
+                        )
+                    }
+
+                    try await group.waitForAll()
+                }
+            }
+    }
+
+    private func getPublicKeyFromAttestation(_ attestationBundle: Data) async throws
+    -> (Curve25519.KeyAgreement.PublicKey, String?) {
+        // https://www.ietf.org/archive/id/draft-thomson-http-oblivious-01.html#name-key-configuration-encoding
+        let keyBytesHeaderSize = 3 // key ID (1) + KEM ID (2)
+        let keyBytesSize = 32
+        let keyBytesTrailerSize = 6 // length of trailer (2) + KDF ID (2) + AEAD ID (2)
+        let expectedKeyConfigSize = keyBytesHeaderSize + keyBytesSize + keyBytesTrailerSize
+
+        if attestationBundle.count == expectedKeyConfigSize {
+            LocalCloudBoardGRPCAsyncClient.logger.log(
+                "Received \(expectedKeyConfigSize, privacy: .public)-byte attestation bundle, interpreting as encoded key configuration"
+            )
+            let publicKey = try Curve25519.KeyAgreement.PublicKey(
+                attestationBundle.subdata(
+                    in: keyBytesHeaderSize ..< (attestationBundle.count - keyBytesTrailerSize)
+                ),
+                kem: .Curve25519_HKDF_SHA256
+            )
+            return (publicKey, nil)
+        } else {
+            LocalCloudBoardGRPCAsyncClient.logger
+                .log("Received CloudAttestation attestation bundle. Extracting public key.")
+            do {
+                let bundle = try AttestationBundle(data: attestationBundle)
+                let bundleJson = try bundle.jsonString()
+                let validator = CloudAttestation.NodeValidator(environment: self.attestationEnvironment)
+                let (key, validity, validatedAttestation) = try await validator.validate(bundle: bundle)
+                LocalCloudBoardGRPCAsyncClient.logger.log(
+                    "Verified attestation bundle with validity \(validity, privacy: .public) and expiration \(validatedAttestation.keyExpiration, privacy: .public), key: \(String(describing: key), privacy: .public)"
+                )
+
+                let rawKey: Data
+                switch key {
+                case .x963(let rawData):
+                    rawKey = rawData
+                case .curve25519(let rawData):
+                    rawKey = rawData
+                default:
+                    LocalCloudBoardGRPCAsyncClient.logger.log("Unknown key type in attestation bundle")
+                    throw LocalCloudBoardGRPCClientError.unknownKeyType(String(describing: key))
+                }
+                let publicKey = try Curve25519.KeyAgreement.PublicKey(rawKey, kem: .Curve25519_HKDF_SHA256)
+                return (publicKey, bundleJson)
+            } catch {
+                LocalCloudBoardGRPCAsyncClient.logger.log(
+                    "Failed to extract key from CloudAttestation attestation bundle: error (\(error, privacy: .public))"
+                )
+                throw LocalCloudBoardGRPCClientError.failedToParseCloudAttestationBundle(error)
+            }
+        }
+    }
+}
+
+/// A sender for a request to the local Cloud Board.
+public struct LocalCloudBoardClientRequestSender: Sendable {
+    private var payloadChunkContinuation: AsyncStream<Data>.Continuation
+
+    internal init(payloadChunkContinuation: AsyncStream<Data>.Continuation) {
+        self.payloadChunkContinuation = payloadChunkContinuation
+    }
+
+    /// Send a chunk of the request to the local Cloud Board
+    /// - Parameters:
+    ///   - chunk: The chunk to send.
+    ///   - isFinal: The final chunk of the request. if True, sender will not send any more chunks after the call.
+    public func sendRequest(chunk: Data, isFinal: Bool = true) {
+        switch self.payloadChunkContinuation.yield(chunk) {
+        case .terminated:
+            preconditionFailure("Trying to add to request after final chunk")
+        default:
+            if isFinal {
+                self.payloadChunkContinuation.finish()
+            }
+        }
+    }
+}
+
+public struct LocalCloudboardClientResponse: AsyncSequence, Sendable {
+    public typealias Element = PrivateCloudComputeResponse
+
+    private var attestation: String?
+    // FIXME: the state machine is not actually sendable!
+    private var oHTTPClientStateMachine: OHTTPClientStateMachine
+    private var responseStream: GRPCAsyncResponseStream<Com_Apple_Cloudboard_Api_V1_InvokeWorkloadResponse>
+
+    internal init(
+        attestation: String? = nil,
+        oHTTPClientStateMachine: OHTTPClientStateMachine,
+        responseStream: GRPCAsyncResponseStream<Com_Apple_Cloudboard_Api_V1_InvokeWorkloadResponse>
+    ) {
+        self.attestation = attestation
+        self.oHTTPClientStateMachine = oHTTPClientStateMachine
+        self.responseStream = responseStream
+    }
+
+    public struct AsyncIterator: AsyncIteratorProtocol {
+        var attestation: String?
+        var attestationSent: Bool = false
+        var oHTTPClientStateMachine: OHTTPClientStateMachine
+
+        var responseStreamIterator: GRPCAsyncResponseStream<Com_Apple_Cloudboard_Api_V1_InvokeWorkloadResponse>
+            .AsyncIterator
+
+        public mutating func next() async throws -> Element? {
+            if !self.attestationSent {
+                self.attestationSent = true
+                if let attestationData = attestation?.data(using: .utf8) {
+                    return .attestation(attestationData)
+                } else {
+                    return .attestation(Data())
+                }
+            } else {
+                if let response = try await responseStreamIterator.next() {
+                    let chunk = response.responseChunk
+
+                    guard chunk.encryptedPayload.count > 0 else {
+                        return PrivateCloudComputeResponse.payload(.init())
+                    }
+
+                    var data = try oHTTPClientStateMachine.decapsulateResponseMessage(
+                        chunk.encryptedPayload,
+                        isFinal: chunk.isFinal
+                    )
+                    if let chunkData = data.readLengthPrefixedChunk() {
+                        let pccResponse = try LocalCloudBoardGRPCAsyncClient
+                            .PrivateCloudComputeResponse(serializedBytes: chunkData)
+                        let message: PrivateCloudComputeResponse
+                        switch pccResponse.type {
+                        case .responseUuid(let uuidData):
+                            if let uuid = UUID(from: uuidData) {
+                                message = PrivateCloudComputeResponse.responseID(uuid)
+                            } else {
+                                throw LocalCloudBoardGRPCClientError.invalidUUIDInCloudComputeResponse
+                            }
+                        case .responsePayload(let payloadData):
+                            message = PrivateCloudComputeResponse.payload(payloadData)
+                        case .responseSummary(let responseSummary):
+                            message = PrivateCloudComputeResponse.summary(responseSummary.textFormatString())
+                        default:
+                            message = PrivateCloudComputeResponse.unknown
+                        }
+                        return message
+                    } else {
+                        return PrivateCloudComputeResponse.payload(.init())
+                    }
+                } else {
+                    return nil
+                }
+            }
+        }
+    }
+
+    public func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(
+            attestation: self.attestation,
+            oHTTPClientStateMachine: self.oHTTPClientStateMachine,
+            responseStreamIterator: self.responseStream.makeAsyncIterator()
+        )
     }
 }
 

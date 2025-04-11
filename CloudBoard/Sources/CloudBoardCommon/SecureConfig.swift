@@ -12,10 +12,8 @@
 // EA1937
 // 10/02/2024
 
-#if canImport(SecureConfigDB)
-@_weakLinked import SecureConfigDB
-#endif
 import os
+@_weakLinked import SecureConfigDB
 
 private enum SecureConfigError: Error {
     case secureConfigDBNotAvailable
@@ -28,16 +26,12 @@ public enum SecureConfigLoader: Sendable {
 
     public func load() throws -> SecureConfig {
         let realSecureConfig: SecureConfig?
-        #if canImport(SecureConfigDB)
         if #_hasSymbol(SecureConfigParameters.self) {
             let secureConfigParameters = try SecureConfigParameters.loadContents()
             realSecureConfig = SecureConfig(parameters: .init(secureConfigParameters))
         } else {
             realSecureConfig = nil
         }
-        #else
-        realSecureConfig = nil
-        #endif
         switch self {
         case .real:
             guard let realSecureConfig else {

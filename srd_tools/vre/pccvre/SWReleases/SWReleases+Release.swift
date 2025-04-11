@@ -58,27 +58,28 @@ public extension SWReleases {
             self.rawData = leaf.rawData
 
             guard tickets != nil else {
-                throw SWReleasesError("release payload: no tickets")
+                throw SWReleasesError("[\(leaf.index)]: release payload: no tickets")
             }
 
             guard apManifest != nil else {
-                throw SWReleasesError("release payload: no OS ticket")
+                throw SWReleasesError("[\(leaf.index)]: release payload: no OS ticket")
             }
 
-            self.metadata = try? SWReleaseMetadata(
-                data: leaf.metadata,
-                releaseHash: dataHash // back annotate as needed
-            )
+            self.metadata = try? SWReleaseMetadata(leaf: leaf)
         }
     }
 }
 
-extension SWReleases.Release: Comparable {
-    public static func < (lhs: SWReleases.Release, rhs: SWReleases.Release) -> Bool {
+extension SWReleases.Release: Comparable, Equatable, Hashable {
+    public static func < (lhs: Self, rhs: Self) -> Bool {
         lhs.index < rhs.index
     }
 
-    public static func == (lhs: SWReleases.Release, rhs: SWReleases.Release) -> Bool {
-        lhs.index == rhs.index
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.dataHash == rhs.dataHash
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(dataHash)
     }
 }

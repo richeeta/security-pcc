@@ -109,14 +109,15 @@ struct TrustedRequestConfiguration: CustomStringConvertible {
         self.userID = userID
     }
 
-    init(
+    init<SystemInfo: SystemInfoProtocol>(
         bundleID: String,
         originatingBundleID: String?,
         featureID: String?,
         sessionID: UUID?,
         configuration: TC2Configuration,
         serverConfiguration: TC2ServerDrivenConfiguration,
-        userID: uid_t?
+        userID: uid_t?,
+        systemInfo: SystemInfo
     ) throws {
         let maxPrefetchedAttestationsFromConfig = configuration[.maxPrefetchedAttestations]
         let maxTotalAttestationsFromConfig = configuration[.maxTotalAttestations]
@@ -155,6 +156,7 @@ struct TrustedRequestConfiguration: CustomStringConvertible {
             ) ?? maxTotalAttestationsFromConfig,
             maxTotalAttestationsFromConfig
         )
+        let environment = configuration.environment(systemInfo: systemInfo)
 
         self.init(
             maxPrefetchedAttestations: maxPrefetchedAttestations,
@@ -165,10 +167,10 @@ struct TrustedRequestConfiguration: CustomStringConvertible {
             rateLimiterMaximumRateLimitTTL: configuration[.rateLimiterMaximumRateLimitTtl],
             rateLimiterDefaultJitterFactor: configuration[.rateLimiterDefaultJitterFactor],
             ignoreCertificateErrors: configuration[.ignoreCertificateErrors],
-            environment: configuration.environment.name,
-            forceOHTTP: configuration.environment.forceOHTTP,
-            endpointURL: configuration.environment.ropesUrl,
-            trustedRequestHostname: configuration.environment.ropesHostname,
+            environment: environment.name,
+            forceOHTTP: environment.forceOHTTP,
+            endpointURL: environment.ropesUrl,
+            trustedRequestHostname: environment.ropesHostname,
             trustedRequestPath: configuration[.trustedRequestPath],
             allowedWorkloadParameters: Set(configuration[.allowedWorkloadParameters].components(separatedBy: ",")),
             testSignalHeader: configuration[.testSignalHeader],

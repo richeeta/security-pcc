@@ -43,7 +43,7 @@ public actor LaunchdJob {
         category: "LaunchdJob"
     )
 
-    public init(_ managedJob: ManagedLaunchdJob, uuid: UUID = UUID(), metrics: (any MetricsSystem)? = nil) throws {
+    public init(_ managedJob: ManagedLaunchdJob, uuid: UUID = UUID(), metrics: (any MetricsSystem)? = nil) {
         self.baseJobHandle = managedJob.jobHandle
         self.uuid = uuid
         (self.stream, self.continuation) = AsyncStream.makeStream(

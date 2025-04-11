@@ -100,7 +100,7 @@ extension SecKey {
     }
 }
 
-final class KeyRotationServiceClient: AuthTokenSigningKeyProvider, Sendable {
+final class KeyRotationServiceClient: AuthTokenSigningKeyProvider {
     public static let logger: os.Logger = .init(
         subsystem: "com.apple.cloudos.cb_jobauthd",
         category: "KeyRotationServiceClient"
@@ -324,13 +324,15 @@ final class KeyRotationServiceClient: AuthTokenSigningKeyProvider, Sendable {
                     }
                     // validate the asset bundle is not expired (cb_jobhelper instances can be prewarmed, so it is too
                     // soon to check for future valid start dates here)
-                    guard Date.now < assetBundle.assetValidEndTimestamp.date else {
+                    guard Date.now < assetBundle.assetValidEndTimestamp.date + self.config
+                        .signingKeysGracePeriodSeconds else {
                         throw KeyRotationServiceClientError.spkiExpiredKey
                     }
                     let signingKey = try SigningKey(
                         derEncodedSPKI: spkiData,
                         validStart: assetBundle.assetValidStartTimestamp.date,
-                        validEnd: assetBundle.assetValidEndTimestamp.date
+                        validEnd: assetBundle.assetValidEndTimestamp
+                            .date + self.config.signingKeysGracePeriodSeconds
                     )
                     keys.append(signingKey)
                     Self.logger.log("""

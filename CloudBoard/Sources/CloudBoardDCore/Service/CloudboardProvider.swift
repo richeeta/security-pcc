@@ -16,6 +16,7 @@
 
 import CloudBoardAttestationDAPI
 import CloudBoardCommon
+import CloudBoardController
 import CloudBoardJobHelperAPI
 import CloudBoardLogging
 import CloudBoardMetrics
@@ -45,42 +46,6 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
     }
 
     static let rpcIDHeaderName = "apple-rpc-uuid"
-
-    // Delegate to handle messages from cb_jobhelper
-    actor JobHelperResponseDelegate: CloudBoardJobHelperAPIClientDelegateProtocol {
-        let responseContinuation: AsyncStream<CloudBoardJobHelperAPI.WorkloadResponse>.Continuation
-
-        init(responseContinuation: AsyncStream<CloudBoardJobHelperAPI.WorkloadResponse>.Continuation) {
-            self.responseContinuation = responseContinuation
-        }
-
-        nonisolated func cloudBoardJobHelperAPIClientSurpriseDisconnect() {
-            CloudBoardProvider.logger.info("surprise disconnect of job helper client")
-            self.responseContinuation.finish()
-        }
-
-        func sendWorkloadResponse(_ response: CloudBoardJobHelperAPI.WorkloadResponse) {
-            CloudBoardProvider.logger.debug("JobHelperResponseDelegate sendWorkloadResponse")
-            self.responseContinuation.yield(response)
-            switch response {
-            case .responseChunk(let responseChunk):
-                if responseChunk.isFinal {
-                    CloudBoardProvider.logger.info("JobHelperResponseDelegate sendWorkloadResponse isFinal")
-                    self.responseContinuation.finish()
-                }
-            case .failureReport:
-                () // nothing more to do, already yielded
-            }
-        }
-    }
-
-    struct JobHelperResponseDelegateProvider: CloudBoardJobHelperResponseDelegateProvider {
-        func makeDelegate(
-            responseContinuation: AsyncStream<WorkloadResponse>.Continuation
-        ) -> CloudBoardJobHelperAPIClientDelegateProtocol {
-            return JobHelperResponseDelegate(responseContinuation: responseContinuation)
-        }
-    }
 
     let sessionStore: SessionStore
 
@@ -179,7 +144,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
             case .initializing, .unhealthy:
                 0
             case .healthy(let state):
-                state.maxBatchSize
+                state?.maxBatchSize ?? 0
             }
 
             self.loadState.withLock {
@@ -203,9 +168,13 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                     .headers
                 try await withTaskCancellationHandler {
                     try await self.policeDraining {
-                        try await self.enforceConcurrentWorkloadLimit {
+                        try await self.enforceConcurrentWorkloadLimit { onClient in
                             do {
-                                try await self._invokeWorkload(requestStream, responseStream)
+                                try await self._invokeWorkload(
+                                    requestStream,
+                                    responseStream,
+                                    notifyOfClientCreation: onClient
+                                )
                             } catch is CancellationError {
                                 // If the top-level task is cancelled we were cancelled by grpc-swift due to the
                                 // connection/stream having been cancelled. In this case CancellationErrors are expected
@@ -240,8 +209,11 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
         return parsedRPCID
     }
 
+    /// This maintains the needed invariants for loadState.concurrentRequestCount
+    /// It is deliberately pessimisitc, it increments as soon as possble, and decrements only when it is sure the helper
+    /// has terminated, to achieve the latter it has to resort to starting a detached task when cancellations occur
     fileprivate func enforceConcurrentWorkloadLimit(
-        executeWorkload: () async throws -> Void
+        executeWorkload: ((CloudBoardJobHelperInstanceProtocol) -> Void) async throws -> Void
     ) async throws {
         try self.loadState.withLock { loadState in
             let maxConcurrentRequests = loadState.maxConcurrentRequests
@@ -274,7 +246,15 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
             self.metrics.emit(Metrics.CloudBoardProvider.ConcurrentRequests(value: loadState.concurrentRequestCount))
             self.concurrentRequestCountContinuation.yield(loadState.concurrentRequestCount)
         }
-        defer {
+
+        // avoid lock ordering, never hold this at the same time as self.loadState
+        let jobHelperInstance = OSAllocatedUnfairLock<CloudBoardJobHelperInstanceProtocol?>(initialState: nil)
+        func notifyOfClientCreation(helper: CloudBoardJobHelperInstanceProtocol) {
+            jobHelperInstance.withLock { $0 = helper }
+        }
+
+        // Safe to call from multiple concurrency domains, but must only be called once
+        func onJobConsideredFinished() {
             self.loadState.withLock { loadState in
                 loadState.concurrentRequestCount -= 1
                 if self.loadConfiguration.overrideCloudAppConcurrentRequests {
@@ -283,7 +263,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                 self.metrics.emit(
                     Metrics.CloudBoardProvider.ConcurrentRequests(value: loadState.concurrentRequestCount)
                 )
-                concurrentRequestCountContinuation.yield(loadState.concurrentRequestCount)
+                self.concurrentRequestCountContinuation.yield(loadState.concurrentRequestCount)
 
                 if let continuation = loadState.idleContinuation {
                     if loadState.concurrentRequestCount == 0 {
@@ -294,7 +274,53 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
             }
         }
 
-        try await executeWorkload()
+        do {
+            try await executeWorkload(notifyOfClientCreation)
+            await self.waitForExit(jobHelperInstance.withLock { $0 })
+            // This must be last call, or part of non throwing final section
+            onJobConsideredFinished()
+        } catch {
+            // nothing we can do, let defer tidy up with a detached task (if it needs to)
+            if let jobHelperInstance = jobHelperInstance.withLock({ $0 }) {
+                Self.logger.info(
+                    "\(Self.logMetadata(), privacy: .public) Spawning detached task to monitor job helpers before releasing workload count"
+                )
+                Task.detached {
+                    await self.waitForExit(jobHelperInstance)
+                    onJobConsideredFinished()
+                    Self.logger.info("\(Self.logMetadata(), privacy: .public) released workload count")
+                }
+
+            } else {
+                onJobConsideredFinished()
+            }
+            throw error
+        }
+    }
+
+    // Technically this will tolerate any wait calls throwing and consider that 'good enough'
+    private func waitForExit(_ jobHelperInstance: CloudBoardJobHelperInstanceProtocol?) async {
+        // we want to be silent in the happy path
+        guard let jobHelperInstance else {
+            return
+        }
+
+        Self.logger.debug("\(Self.logMetadata(), privacy: .public) Waiting for job helper to exit")
+        do {
+            try await jobHelperInstance.waitForExit(returnIfNotUsed: true)
+        } catch {
+            // There's not much we can do here (apart from log), either we consider the job completed,
+            // and consider finished, or we blow up spectacularly to cause a restart of some form.
+            // Just pretending the job is running constantly is a bad state to be in (even if it is)
+            // because nothing is definitely going to take action to clean that state up.
+            // since there are other protections against concurrent jobs, and the time it will spend in
+            // this state is likely small we consider it done
+            Self.logger.error("""
+            \(Self.logMetadata(), privacy: .public) \
+            Unexpected error while waiting for job helper to exit: \
+            \(String(unredacted: error), privacy: .public)
+            """)
+        }
     }
 
     public func pause() async throws {
@@ -343,7 +369,8 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
 
     fileprivate func _invokeWorkload(
         _ requestStream: GRPCAsyncRequestStream<Com_Apple_Cloudboard_Api_V1_InvokeWorkloadRequest>,
-        _ responseStream: GRPCAsyncResponseStreamWriter<Com_Apple_Cloudboard_Api_V1_InvokeWorkloadResponse>
+        _ responseStream: GRPCAsyncResponseStreamWriter<Com_Apple_Cloudboard_Api_V1_InvokeWorkloadResponse>,
+        notifyOfClientCreation: (CloudBoardJobHelperInstanceProtocol) -> Void
     ) async throws {
         try await withErrorLogging(
             operation: "_invokeWorkload",
@@ -352,17 +379,22 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
         ) {
             CloudBoardProviderCheckpoint(
                 logMetadata: Self.logMetadata(),
+                operationName: "cloudboard_invoke_workload_request_received",
                 message: "invokeWorkload() received workload invocation request"
             ).log(to: Self.logger)
 
-            let (jobHelperResponseStream, jobHelperResponseContinuation) = AsyncStream<WorkloadResponse>.makeStream()
+            let (jobHelperResponseStream, jobHelperResponseContinuation) = AsyncStream<JobHelperInvokeWorkloadResponse>
+                .makeStream()
 
             let delegate = await self.jobHelperResponseDelegateProvider
-                .makeDelegate(responseContinuation: jobHelperResponseContinuation)
+                .makeDelegate(invokeWorkloadResponseContinuation: jobHelperResponseContinuation)
             let idleTimeout = await self.idleTimeout(
                 taskName: "invokeWorkload", taskID: CloudBoardDaemon.rpcID.uuidString
             )
             try await self.jobHelperClientProvider.withClient(delegate: delegate) { jobHelperClient in
+                // Once we have taken ownership of a client we must ensure the accounting system knows
+                // we own it before we do anything else
+                notifyOfClientCreation(jobHelperClient)
                 try await withThrowingTaskGroup(of: WorkloadTaskResult.self) { group in
                     group.addTaskWithLogging(
                         operation: "_invokeWorkload.idleTimeout",
@@ -374,6 +406,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                         } catch let error as IdleTimeoutError {
                             CloudBoardProviderCheckpoint(
                                 logMetadata: Self.logMetadata(),
+                                operationName: "cloudboard_invoke_workload_idle_timeout_error",
                                 message: "preparing idle timeout",
                                 error: error
                             ).log(to: Self.logger, level: .error)
@@ -404,7 +437,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                         diagnosticKeys: CloudBoardDaemonDiagnosticKeys([.rpcID]),
                         sensitiveError: false
                     ) {
-                        try await jobHelperClient.waitForExit()
+                        try await jobHelperClient.waitForExit(returnIfNotUsed: false)
                         // Now that we no longer have a cb_jobhelper instance, ensure
                         // the output stream is finished.
                         jobHelperResponseContinuation.finish()
@@ -446,6 +479,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                                 case .failureReport(let failureReason):
                                     CloudBoardProviderCheckpoint(
                                         logMetadata: Self.logMetadata(),
+                                        operationName: "cb_jobhelper_failure_response",
                                         message: "received error response from cb_jobhelper with FailureReason"
                                     ).log(failureReason: failureReason, to: Self.logger)
                                     let pushFailureReportsToROPES: Bool = await self.hotProperties?.currentValue?
@@ -492,6 +526,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                         if case .completed = status {
                             CloudBoardProviderCheckpoint(
                                 logMetadata: Self.logMetadata(),
+                                operationName: "cb_jobhelper_completed",
                                 message: "cb_jobhelper exited + output completed, cancelling remaining work in invokeWorkload"
                             ).log(to: Self.logger)
                             group.cancelAll()
@@ -511,12 +546,13 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
         if case .setup = request.type {
             return
         }
-        if let jobHelperRequest = InvokeWorkloadRequest(from: request) {
+        if let jobHelperRequest = CloudBoardDaemonToJobHelperMessage(from: request) {
             try stateMachine.receive(jobHelperRequest)
             try await jobHelperClient.invokeWorkloadRequest(jobHelperRequest)
         } else {
             CloudBoardProviderCheckpoint(
                 logMetadata: Self.logMetadata(),
+                operationName: "cloudboard_received_invalid_request_message",
                 message: "received invalid InvokeWorkloadRequest message on request stream, ignoring"
             ).log(to: Self.logger, level: .error)
         }
@@ -554,6 +590,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                     case .setup:
                         CloudBoardProviderCheckpoint(
                             logMetadata: Self.logMetadata(),
+                            operationName: "awaiting_warmup_complete_before_workload_setup_request",
                             message: "received workload setup request, awaiting warmup complete before continuing"
                         ).log(to: Self.logger)
                         span.attributes.requestSummary.workloadRequestAttributes.receivedSetup = true
@@ -573,6 +610,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                             )
                             CloudBoardProviderCheckpoint(
                                 logMetadata: Self.logMetadata(),
+                                operationName: "wait_for_warmup_complete_returned_error",
                                 message: "waitForWarmupComplete returned error",
                                 error: error
                             ).log(to: Self.logger, level: .error)
@@ -580,6 +618,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                         }
                         CloudBoardProviderCheckpoint(
                             logMetadata: Self.logMetadata(),
+                            operationName: "warmup_completed",
                             message: "warmup completed, sending acknowledgement"
                         ).log(to: Self.logger)
                         idleTimeout.registerActivity()
@@ -589,6 +628,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                     case .parameters:
                         CloudBoardProviderCheckpoint(
                             logMetadata: Self.logMetadata(),
+                            operationName: "workload_parameter_request_received",
                             message: "received workload parameters request"
                         ).log(to: Self.logger)
 
@@ -614,15 +654,22 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                         } catch {
                             CloudBoardProviderCheckpoint(
                                 logMetadata: Self.logMetadata(),
+                                operationName: "decryption_key_addition_to_session_store_failed",
                                 message: "Failed to add decryption key to session store",
                                 error: error
                             ).log(to: Self.logger, level: .error)
                             throw error
                         }
                     case .requestChunk(let chunk):
+                        let message: StaticString = if chunk.isFinal {
+                            "workload_request_final_chunk_received"
+                        } else {
+                            "workload_request_chunk_received"
+                        }
                         CloudBoardProviderCheckpoint(
                             logMetadata: Self.logMetadata(),
-                            message: "received workload request chunk request"
+                            operationName: message,
+                            message: message
                         ).log(to: Self.logger)
                         span.attributes.requestSummary.workloadRequestAttributes.chunkSize = chunk.encryptedPayload
                             .count
@@ -633,6 +680,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
                         span.attributes.requestSummary.workloadRequestAttributes.ropesTerminationReason = message.reason
                         CloudBoardProviderCheckpoint(
                             logMetadata: Self.logMetadata(),
+                            operationName: "termination_from_ropes",
                             message: "Received termination notification from ROPES"
                         ).log(
                             terminationCode: message.code.rawValue,
@@ -676,17 +724,16 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
         try await withErrorLogging(operation: "watchLoadLevel", sensitiveError: false) {
             Self.logger.info("received watch load level request")
 
-            var lastWorkload: Workload?
-
             for await status in self.healthMonitor.watch() {
                 Self.logger.info("new load status: \(status, privacy: .public)")
 
                 switch status {
                 case .healthy(let healthy):
-                    let newWorkload = Workload(healthy)
-                    let sendWorkload = newWorkload != lastWorkload
-                    try await responseStream.send(.init(healthy, sendWorkload: sendWorkload))
-                    lastWorkload = newWorkload
+                    if let healthy {
+                        try await responseStream.send(.init(healthy))
+                    } else {
+                        fallthrough
+                    }
                 case .initializing, .unhealthy:
                     // Unhealthy means load level of 0.
                     try await responseStream.send(.with {
@@ -731,6 +778,15 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
         }
     }
 
+    func invokeProxyDialBack(
+        requestStream _: GRPCAsyncRequestStream<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackRequest>,
+        responseStream _: GRPCAsyncResponseStreamWriter<Com_Apple_Cloudboard_Api_V1_InvokeProxyDialBackResponse>,
+        context _: GRPCAsyncServerCallContext
+    )
+    async throws {
+        throw GRPCStatus(code: .unimplemented)
+    }
+
     func drain() async {
         await withCheckedContinuation { drainCompleteContinuation in
             self.drainState.withLock { drainState in
@@ -753,6 +809,7 @@ final class CloudBoardProvider: Com_Apple_Cloudboard_Api_V1_CloudBoardAsyncProvi
         )
         CloudBoardProviderCheckpoint(
             logMetadata: Self.logMetadata(),
+            operationName: "preparing_idle_timeout",
             message: "preparing idle timeout"
         ).log(timeoutDuration: duration, to: Self.logger)
         return IdleTimeout(timeout: duration, taskName: taskName, taskID: taskID)
@@ -765,7 +822,7 @@ struct LoadState {
     var idleContinuation: AsyncStream<Void>.Continuation?
 }
 
-extension InvokeWorkloadRequest {
+extension CloudBoardDaemonToJobHelperMessage {
     init?(from cloudBoardRequest: Com_Apple_Cloudboard_Api_V1_InvokeWorkloadRequest) {
         switch cloudBoardRequest.type {
         case .parameters(let parameters):
@@ -804,7 +861,7 @@ struct InvokeWorkloadRequestStateMachine {
         self.state = .awaitingFinalChunkAndDecryptionKey
     }
 
-    mutating func receive(_ request: InvokeWorkloadRequest) throws {
+    mutating func receive(_ request: CloudBoardDaemonToJobHelperMessage) throws {
         if case .requestChunk(_, let isFinal) = request, isFinal {
             switch self.state {
             case .awaitingFinalChunkAndDecryptionKey:
@@ -842,34 +899,17 @@ struct InvokeWorkloadRequestStateMachine {
     }
 }
 
-private struct Workload: Hashable {
-    var type: String
-    var tags: [String: [String]]
-
-    init(_ status: ServiceHealthMonitor.Status.Healthy) {
-        self.type = status.workloadType
-        self.tags = status.tags
-    }
-}
-
 extension Com_Apple_Cloudboard_Api_V1_LoadResponse {
-    init(_ status: ServiceHealthMonitor.Status.Healthy, sendWorkload: Bool) {
+    init(_ status: ServiceHealthMonitor.Status.Healthy) {
         self = .with {
             $0.currentBatchSize = UInt32(status.currentBatchSize)
             $0.maxBatchSize = UInt32(status.maxBatchSize)
             $0.optimalBatchSize = UInt32(status.optimalBatchSize)
-
-            if sendWorkload {
-                $0.workload = .with {
-                    $0.type = status.workloadType
-                    $0.param = .init(status.tags)
-                }
-            }
         }
     }
 }
 
-extension [Com_Apple_Cloudboard_Api_V1_Workload.Parameter] {
+extension [Proto_Ropes_Common_Workload.Parameter] {
     init(_ tags: [String: [String]]) {
         self = tags.map { key, values in
             .with {
@@ -902,8 +942,8 @@ extension CloudBoardProvider {
 
 extension Parameters.PlaintextMetadata {
     init(
-        tenantInfo: Com_Apple_Cloudboard_Api_V1_TenantInfo,
-        workload: Com_Apple_Cloudboard_Api_V1_Workload
+        tenantInfo: Proto_Ropes_Common_TenantInfo,
+        workload: Proto_Ropes_Common_Workload
     ) {
         self.init(
             bundleID: tenantInfo.bundleID,
@@ -918,7 +958,7 @@ extension Parameters.PlaintextMetadata {
 }
 
 extension [String: [String]] {
-    init(parameters: [Com_Apple_Cloudboard_Api_V1_Workload.Parameter]) {
+    init(parameters: [Proto_Ropes_Common_Workload.Parameter]) {
         self = [:]
 
         for parameter in parameters {
@@ -948,7 +988,7 @@ struct CloudBoardProviderCheckpoint: RequestCheckpoint {
 
     public init(
         logMetadata: CloudBoardDaemonLogMetadata,
-        operationName: StaticString = #function,
+        operationName: StaticString,
         message: StaticString,
         error: Error? = nil
     ) {
@@ -964,8 +1004,8 @@ struct CloudBoardProviderCheckpoint: RequestCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
-        remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         rpcId=\(self.logMetadata.rpcID?.uuidString ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
@@ -983,8 +1023,8 @@ struct CloudBoardProviderCheckpoint: RequestCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
-        remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         rpcId=\(self.logMetadata.rpcID?.uuidString ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
@@ -1003,8 +1043,8 @@ struct CloudBoardProviderCheckpoint: RequestCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
-        remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         rpcId=\(self.logMetadata.rpcID?.uuidString ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
@@ -1024,7 +1064,7 @@ struct CloudBoardProviderCheckpoint: RequestCheckpoint {
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
         remotePid=\(String(describing: self.logMetadata.remotePID), privacy: .public)
-        requestId=\(self.requestID ?? "", privacy: .public)
+        request.uuid=\(self.requestID ?? "", privacy: .public)
         rpcId=\(self.logMetadata.rpcID?.uuidString ?? "", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)

@@ -33,12 +33,7 @@ class PCCVRELicenseAgreementManager {
     let licenseAgreementHash: String
 
     init(licenseAgreementPath: URL, licenseAgreementPreferenceBaseLocation: URL, licenseAgreementHash: String) {
-        if FileManager.default.fileExists(atPath: licenseAgreementPath.path()) {
-            self.licenseAgreementPath = licenseAgreementPath
-        } else {
-            // Temporary hack as we'll be shipping these tools in a tarball.
-            self.licenseAgreementPath = URL(fileURLWithPath: (Bundle.main.executableURL?.deletingLastPathComponent().path() ?? ".") + "/../../" + "License.rtf")
-        }
+        self.licenseAgreementPath = licenseAgreementPath
 
         licenseAgreementPreferencePath = licenseAgreementPreferenceBaseLocation.appending(path: PCCVRELicenseAgreementManager.licenseAgreementPrefFileName, directoryHint: .notDirectory)
         self.licenseAgreementHash = licenseAgreementHash
@@ -72,11 +67,7 @@ class PCCVRELicenseAgreementManager {
             }
         } catch {
             print("Error when reading contents from \(licenseAgreementPreferencePath), attempting to gracefully continue")
-            do {
-                try fm.removeItem(at: licenseAgreementPreferencePath)
-            } catch {
-                // ignore!
-            }
+            try? fm.removeItem(at: licenseAgreementPreferencePath)
             return false
         }
 

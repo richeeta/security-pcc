@@ -12,9 +12,6 @@
 // EA1937
 // 10/02/2024
 
-// Modified removing unnecessary information from:
-// https://github.pie.apple.com/CAE/edge-proto/blob/main/proto/src/main/proto/keyrotationservice/keyrotationapi.proto
-
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";

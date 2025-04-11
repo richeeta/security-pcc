@@ -31,7 +31,7 @@ protocol TC2Schedulable: Sendable {
 final class TC2ScheduledTask: Sendable {
     let work: TC2Schedulable
     let identifier: String
-    let logger = tc2Logger(forCategory: .ScheduledTask)
+    let logger = tc2Logger(forCategory: .scheduledTask)
 
     init(preregisteredIdentifier identifier: String, work: TC2Schedulable) {
         self.identifier = identifier
@@ -40,8 +40,14 @@ final class TC2ScheduledTask: Sendable {
 
     func register() {
         BGSystemTaskScheduler.shared.registerForTask(withIdentifier: self.identifier, using: .global(qos: .background)) { task in
+            let logPrefix = "\(self.identifier):"
+
+            task.expirationHandlerWithReason = { reason in
+                self.logger.log("\(logPrefix) scheduled task is being expired reason=\(reason.rawValue)")
+            }
+
             Task(priority: .background) {
-                self.logger.log("Performing scheduled work for \(self.identifier)")
+                self.logger.log("\(logPrefix) performing scheduled task")
                 await self.work.performScheduledWork()
                 task.setTaskCompleted()
             }

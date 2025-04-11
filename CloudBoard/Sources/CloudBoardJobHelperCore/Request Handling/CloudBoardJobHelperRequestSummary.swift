@@ -26,6 +26,7 @@ struct CloudBoardJobHelperRequestSummary: RequestSummary {
     let namespace: String = "cloudboard"
     var requestPlaintextMetadata: ParametersData.PlaintextMetadata?
     var jobUUID: UUID
+    var remotePID: Int?
     var requestMessageCount: Int = 0
     var responseMessageCount: Int = 0
     var error: Error?
@@ -53,6 +54,7 @@ struct CloudBoardJobHelperRequestSummary: RequestSummary {
         logger.log("""
         ttl=\(self.type, privacy: .public)
         jobID=\(self.jobUUID.uuidString, privacy: .public)
+        remotePid=\(self.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
         request.uuid=\(self.requestID ?? "UNKNOWN", privacy: .public)
         client.feature_id=\(self.requestPlaintextMetadata?.featureID ?? "", privacy: .public)
         client.bundle_id=\(self.requestPlaintextMetadata?.bundleID ?? "", privacy: .public)
@@ -111,6 +113,7 @@ struct WorkloadJobManagerCheckpoint: RequestCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
         request.uuid=\(self.requestID ?? "UNKNOWN", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
@@ -136,6 +139,7 @@ extension WorkloadJobManagerCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
         request.uuid=\(self.requestID ?? "UNKNOWN", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
@@ -163,6 +167,7 @@ extension PipelinePayload {
         case .endOfInput: return "endOfInput"
         case .oneTimeToken: return "oneTimeToken"
         case .parameters: return "parameters"
+        case .abandon: return "abandon"
         case .teardown: return "teardown"
         case .warmup: return "warmup"
         }
@@ -177,6 +182,7 @@ extension PipelinePayload: CustomStringConvertible where T == Data {
         case .endOfInput: return "endOfInput"
         case .oneTimeToken: return "oneTimeToken"
         case .parameters(let parameters): return "parameters \(parameters.plaintextMetadata)"
+        case .abandon: return "abandon"
         case .teardown: return "teardown"
         case .warmup(let warmup): return "warmup \(warmup)"
         }
@@ -193,6 +199,7 @@ extension WorkloadJobManagerCheckpoint {
         logger.log(level: level, """
         ttl=\(self.type, privacy: .public)
         jobID=\(self.logMetadata.jobID?.uuidString ?? "", privacy: .public)
+        remotePid=\(self.logMetadata.remotePID.map { String(describing: $0) } ?? "", privacy: .public)
         request.uuid=\(self.requestID ?? "UNKNOWN", privacy: .public)
         tracing.name=\(self.operationName, privacy: .public)
         tracing.type=\(self.type, privacy: .public)
@@ -279,8 +286,9 @@ extension WorkloadJobStateMachine.State {
         switch self {
         case .awaitingOneTimeToken: "awaitingOneTimeToken"
         case .awaitingTokenGrantingToken: "awaitingTokenGrantingToken"
-        case .terminated: "terminated"
         case .validatedTokenGrantingToken: "validatedTokenGrantingToken"
+        case .abandoning: "abandoning"
+        case .terminated: "terminated"
         }
     }
 }

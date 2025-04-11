@@ -16,7 +16,7 @@
 
 import Foundation
 
-package protocol CloudBoardJobAPIServerToClientProtocol: AnyActor, Sendable {
+package protocol CloudBoardJobAPIServerToClientProtocol: Actor {
     func findHelper(helperID: UUID) async throws
     func sendHelperMessage(helperID: UUID, data: Data) async throws
     func sendHelperEOF(helperID: UUID) async throws

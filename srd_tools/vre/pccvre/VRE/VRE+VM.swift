@@ -20,6 +20,7 @@
 import Foundation
 
 private let vrevmCommand = "vrevm"
+private let envExitOnPID = "\(vrevmCommand)_EXIT_ON_PID".uppercased()
 
 extension VRE {
     struct VM {
@@ -235,7 +236,9 @@ extension VRE {
             VRE.logger.debug("\(printCmd ?? commandLine.joined(separator: " "), privacy: .public)")
 
             let execQueue = DispatchQueue(label: applicationName + ".exec", qos: .userInitiated)
-            let (exitCode, stdOutput, stdError) = try ExecCommand(commandLine).run(
+            // let vrevm know it was launched by us for monitoring in case we exit abnormally (and exit itself)
+            let envvars = [envExitOnPID: String(getpid())]
+            let (exitCode, stdOutput, stdError) = try ExecCommand(commandLine, envvars: envvars).run(
                 outputMode: outMode,
                 queue: execQueue
             )

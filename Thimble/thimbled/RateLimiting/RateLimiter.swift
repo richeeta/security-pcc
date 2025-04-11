@@ -50,13 +50,6 @@ final actor RateLimiter: RateLimiterProtocol {
         // implicated on every request.
         var sessionLog: SessionLog
 
-        init(rateLimitConfigurations: RateLimitConfigurationSet, requestLog: RequestLog, deniedLog: DeniedRequestLog, sessionLog: SessionLog) {
-            self.rateLimitConfigurations = rateLimitConfigurations
-            self.requestLog = requestLog
-            self.deniedLog = deniedLog
-            self.sessionLog = sessionLog
-        }
-
         mutating func reset() {
             self.rateLimitConfigurations = RateLimitConfigurationSet()
             self.requestLog = RequestLog()
@@ -68,7 +61,7 @@ final actor RateLimiter: RateLimiterProtocol {
     static let filename = "ratelimitmodel_v3.plist"
     private let encoder = PropertyListEncoder()
     private let decoder = PropertyListDecoder()
-    private let logger = tc2Logger(forCategory: .RateLimiter)
+    private let logger = tc2Logger(forCategory: .rateLimiter)
     private let file: URL?
     private var model: RateLimitModel
     private let config: TC2Configuration
@@ -92,7 +85,7 @@ final actor RateLimiter: RateLimiterProtocol {
         do {
             data = try Data(contentsOf: file)
         } catch {
-            logger.warning("persistence does not yet exist, or unable to read persisted ratelimiter, file=\(file), error=\(error)")
+            logger.log("persistence does not yet exist, or unable to read persisted ratelimiter, file=\(file), error=\(error)")
             self.model = RateLimitModel(rateLimitConfigurations: RateLimitConfigurationSet(), requestLog: RequestLog(), deniedLog: DeniedRequestLog(), sessionLog: SessionLog())
             return
         }
@@ -105,6 +98,12 @@ final actor RateLimiter: RateLimiterProtocol {
         }
 
         logger.debug("initialized ratelimiter, file=\(file)")
+    }
+
+    static func migrate(from source: URL, to destination: URL) {
+        let sourceFile = source.appending(path: Self.filename)
+        let destinationFile = destination.appending(path: Self.filename)
+        moveDaemonStateFile(from: sourceFile, to: destinationFile)
     }
 
     // The amount of data we have to save here is bounded by the various ttl and
@@ -142,7 +141,7 @@ extension RateLimiter {
     func rateLimitDenialInfo(now: Date = Date.now, for requestMetadata: RateLimiterRequestMetadata, sessionID: UUID?) -> TrustedCloudComputeError.RateLimitInfo? {
         // First of all, do we know of a denial?
         if let newRateLimit = self.model.deniedLog.knownDenied(now: now, requestMetadata: requestMetadata) {
-            logger.warning("rate limit applied from cached denials")
+            logger.error("rate limit applied from cached denials")
             return newRateLimit
         }
 
@@ -157,7 +156,7 @@ extension RateLimiter {
             if config.timing.count == 0 {
                 // This is a matching config that does not allow any requests. No
                 // need to consult anything, it's a definite denial.
-                logger.warning("rate limit applied for rate with count=0")
+                logger.error("rate limit applied for rate with count=0")
                 let retryAfterDate = now + config.timing.duration + config.timing.jitter * Double.random(in: 0.0..<1.0)
                 let newRateLimit = TrustedCloudComputeError.RateLimitInfo(rateLimitConfig: config, retryAfterDate: retryAfterDate)
                 self.model.deniedLog.append(requestMetadata: requestMetadata, rateLimitInfo: newRateLimit)
@@ -174,7 +173,7 @@ extension RateLimiter {
                 // This is the first request in a session--measure for real.
                 shouldDeny = existingRequestCount >= config.timing.count
                 if shouldDeny {
-                    logger.warning("rate limit applied for rate with count=\(config.timing.count), duration=\(config.timing.duration)")
+                    logger.error("rate limit applied for rate with count=\(config.timing.count), duration=\(config.timing.duration)")
                 }
             } else {
                 assert(sessionProgress > 0)
@@ -198,7 +197,7 @@ extension RateLimiter {
                 default:  // case (config.timing.count + extraRequests)...:
                     // Beyond all limits
                     shouldDeny = true
-                    logger.warning("rate limit applied for rate with count=\(config.timing.count), duration=\(config.timing.duration), sessionProgress=\(sessionProgress)")
+                    logger.error("rate limit applied for rate with count=\(config.timing.count), duration=\(config.timing.duration), sessionProgress=\(sessionProgress)")
                 }
             }
 

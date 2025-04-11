@@ -21,9 +21,29 @@ public protocol CloudBoardJobHelperAPIServerProtocol: CloudBoardJobHelperAPIServ
     func connect() async
 }
 
-public enum WorkloadResponse: Codable, Sendable {
+public enum JobHelperToCloudBoardDaemonMessage: Codable, Sendable {
     case responseChunk(ResponseChunk) // encapsulates previous `WorkloadResponse` struct
     case failureReport(FailureReason)
+}
+
+extension JobHelperToCloudBoardDaemonMessage: Equatable {
+    public static func == (
+        lhs: JobHelperToCloudBoardDaemonMessage,
+        rhs: JobHelperToCloudBoardDaemonMessage
+    ) -> Bool {
+        switch lhs {
+        case .responseChunk(let lhsChunk):
+            if case .responseChunk(let rhsChunk) = rhs {
+                return lhsChunk == rhsChunk
+            }
+            return false
+        case .failureReport(let lhsReason):
+            if case .failureReport(let rhsReason) = rhs {
+                return lhsReason == rhsReason
+            }
+            return false
+        }
+    }
 }
 
 /// `FailureReason` describes a reason for a workload invocation failure which should be reported back to CloudBoard.
@@ -47,8 +67,8 @@ public struct ResponseChunk: Codable, Sendable {
 
 extension CloudBoardJobHelperAPI.ResponseChunk: Equatable {}
 
-public protocol CloudBoardJobHelperAPIServerToClientProtocol: AnyActor, Sendable {
-    func sendWorkloadResponse(_ response: WorkloadResponse) async throws
+public protocol CloudBoardJobHelperAPIServerToClientProtocol: Actor {
+    func sendWorkloadResponse(_ response: JobHelperToCloudBoardDaemonMessage) async throws
 }
 
 public protocol CloudBoardJobHelperAPIServerDelegateProtocol: AnyObject, Sendable,

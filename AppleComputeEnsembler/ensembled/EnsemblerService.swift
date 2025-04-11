@@ -27,9 +27,9 @@ import Security
 
 @_spi(Daemon) import Ensemble // _spi interface used for mach service name, protocol
 
+import CryptoKit
 @_spi(Private) import XPC // Private/_spi interfaces used for entitlement-checking
 import XPCPrivate
-import CryptoKit
 
 let kEnsemblerEntitlementPrefix = "com.apple.private.AppleComputeEnsembler"
 let kEnsemblerStatusEntitlement = kEnsemblerEntitlementPrefix + ".read"
@@ -267,13 +267,12 @@ struct EnsemblerService {
 			}
 
 			EnsemblerService.logger.info("Found ensembler, getting max buffers per key...")
-            do {
-                return EnsemblerResponse(result: true, maxBuffersPerKey: try ensembler.getMaxBuffersPerKey())
-            }
-            catch {
-                EnsemblerService.logger.error("Error getting max buffers per key: \(error)")
-                return EnsemblerResponse(result: false)
-            }
+			do {
+				return try EnsemblerResponse(result: true, maxBuffersPerKey: ensembler.getMaxBuffersPerKey())
+			} catch {
+				EnsemblerService.logger.error("Error getting max buffers per key: \(error)")
+				return EnsemblerResponse(result: false)
+			}
 		}
 
 		/// Get maxSecsPerKey
@@ -285,13 +284,12 @@ struct EnsemblerService {
 			}
 
 			EnsemblerService.logger.info("Found ensembler, getting max seconds per key...")
-            do {
-                return EnsemblerResponse(result: true, maxSecsPerKey: try ensembler.getMaxSecondsPerKey())
-            }
-            catch {
-                EnsemblerService.logger.error("Error getting max buffers per key: \(error)")
-                return EnsemblerResponse(result: false)
-            }
+			do {
+				return try EnsemblerResponse(result: true, maxSecsPerKey: ensembler.getMaxSecondsPerKey())
+			} catch {
+				EnsemblerService.logger.error("Error getting max buffers per key: \(error)")
+				return EnsemblerResponse(result: false)
+			}
 		}
 
 		/// Encrypts plain text data
@@ -340,29 +338,29 @@ struct EnsemblerService {
 				return EnsemblerResponse(result: false)
 			}
 		}
-        
-        /// Get Authcode for the data
-        func getAuthCode(data: Data) -> Encodable {
-            EnsemblerService.logger.info("Getting the auth code")
-            guard let ensembler = EnsemblerService.ensembler else {
-                EnsemblerService.logger.error("Ensembler NOT configured! Initialization error?")
-                return EnsemblerResponse(result: false, status: .uninitialized)
-            }
 
-            guard ensembler.status == .ready else {
-                EnsemblerService.logger
-                    .error("Ensembler not ready yet. Cannot get auth code before status is ready")
-                return EnsemblerResponse(result: false, status: ensembler.status)
-            }
+		/// Get Authcode for the data
+		func getAuthCode(data: Data) -> Encodable {
+			EnsemblerService.logger.info("Getting the auth code")
+			guard let ensembler = EnsemblerService.ensembler else {
+				EnsemblerService.logger.error("Ensembler NOT configured! Initialization error?")
+				return EnsemblerResponse(result: false, status: .uninitialized)
+			}
 
-            do {
-                let authCode = try ensembler.getAuthCode(data: data)
-                return EnsemblerResponse(result: true, authCode: authCode)
-            } catch {
-                EnsemblerService.logger.error("Error getting auth code : \(error)")
-                return EnsemblerResponse(result: false)
-            }
-        }
+			guard ensembler.status == .ready else {
+				EnsemblerService.logger
+					.error("Ensembler not ready yet. Cannot get auth code before status is ready")
+				return EnsemblerResponse(result: false, status: ensembler.status)
+			}
+
+			do {
+				let authCode = try ensembler.getAuthCode(data: data)
+				return EnsemblerResponse(result: true, authCode: authCode)
+			} catch {
+				EnsemblerService.logger.error("Error getting auth code : \(error)")
+				return EnsemblerResponse(result: false)
+			}
+		}
 
 		/// Rotate the shared key
 		func rotateSharedKey() -> Encodable {
@@ -453,7 +451,7 @@ struct EnsemblerService {
 				return EnsemblerResponse(result: false, error: String(describing: error))
 			}
 		}
-      
+
 		func handleIncomingRequest(_ message: XPCReceivedMessage) -> Encodable? {
 			var audit = message.auditToken
 
@@ -487,22 +485,22 @@ struct EnsemblerService {
 			var healthAllowed = controlAllowed
 			if !healthAllowed,
 			   let healthEntitlement = xpc_copy_entitlement_for_token(
-					kEnsemblerHealthEntitlement,
-					&audit
+			   	kEnsemblerHealthEntitlement,
+			   	&audit
 			   ) {
 				healthAllowed = xpc_bool_get_value(healthEntitlement)
 			}
 
-            var coordinationServiceAllowed = false
+			var coordinationServiceAllowed = false
 
-            // A coordinationservice entitlement is  needed for getting tls options
-            if let coordinationServiceEntitlement = xpc_copy_entitlement_for_token(
-                kEnsemblerCoordinationServiceEntitlement,
-                &audit
-            ) {
-                coordinationServiceAllowed = xpc_bool_get_value(coordinationServiceEntitlement)
-            }
-            
+			// A coordinationservice entitlement is  needed for getting tls options
+			if let coordinationServiceEntitlement = xpc_copy_entitlement_for_token(
+				kEnsemblerCoordinationServiceEntitlement,
+				&audit
+			) {
+				coordinationServiceAllowed = xpc_bool_get_value(coordinationServiceEntitlement)
+			}
+
 			// Attempt to re-initialize if we failed before
 			if EnsemblerService.ensembler == nil {
 				_ = self.reloadConfiguration()
@@ -518,8 +516,6 @@ struct EnsemblerService {
 				case (.getDraining, _):
 					return self.getDraining()
 				case (.reloadConfiguration, true):
-					// TODO: This is kind of a noop, perhaps it should force cfprefs to re-read
-					// TODO: from disk or something?
 					return self.reloadConfiguration()
 				default:
 					break
@@ -532,33 +528,33 @@ struct EnsemblerService {
 				}
 
 				// For health state and cable diagnostics, check `healthAllowed`.
-                // For getting auth code used for tls options, check `coordinationServiceAllowed`
-				switch (request) {
+				// For getting auth code used for tls options, check `coordinationServiceAllowed`
+				switch request {
 				case .getHealth, .getCableDiagnostics:
 					guard healthAllowed else {
 						let err = EnsemblerServiceError.unauthorizedOrUnknownOperation
 						EnsemblerService.logger.error(
-						   """
-						   Missing entitlement: \
-						   .getCableDiagnostics needs at least one of the following: \
-						   [\(kEnsemblerHealthEntitlement), \(kEnsemblerControlEntitlement)]
-						   """
+							"""
+							Missing entitlement: \
+							.getCableDiagnostics needs at least one of the following: \
+							[\(kEnsemblerHealthEntitlement), \(kEnsemblerControlEntitlement)]
+							"""
 						)
 						return EnsemblerResponse(result: false, error: String(describing: err))
 					}
-                case .getAuthCode(let data):
-                    guard coordinationServiceAllowed else {
-                        let err = EnsemblerServiceError.unauthorizedOrUnknownOperation
-                        EnsemblerService.logger.error(
-                           """
-                           Missing entitlement: \
-                           .getAuthCode needs following entitlement: \
-                           [\(kEnsemblerCoordinationServiceEntitlement)]
-                           """
-                        )
-                        return EnsemblerResponse(result: false, error: String(describing: err))
-                    }
-                    return self.getAuthCode(data: data)
+				case .getAuthCode(let data):
+					guard coordinationServiceAllowed else {
+						let err = EnsemblerServiceError.unauthorizedOrUnknownOperation
+						EnsemblerService.logger.error(
+							"""
+							Missing entitlement: \
+							.getAuthCode needs following entitlement: \
+							[\(kEnsemblerCoordinationServiceEntitlement)]
+							"""
+						)
+						return EnsemblerResponse(result: false, error: String(describing: err))
+					}
+					return self.getAuthCode(data: data)
 				default:
 					break
 				}
@@ -640,8 +636,8 @@ struct EnsemblerService {
 					SessionHandler()
 				}
 			}
-            await EnsembleWatchdogService.activate()
-            await Task.suspendIndefinitely()
+			await EnsembleWatchdogService.activate()
+			await Task.suspendIndefinitely()
 		} catch {
 			EnsemblerService.logger.error("Failed to create listener, error: \(error)")
 			throw EnsemblerServiceError.serviceInitializationFailure(error: error)

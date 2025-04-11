@@ -19,30 +19,7 @@
 //  Copyright © 2024 Apple Inc. All rights reserved.
 //
 
-import FeatureFlags
 import Foundation
-
-package enum TC2EnvironmentFlags: FeatureFlagsKey {
-    // On internal builds, this must be turned off to configure any
-    // environment except the default of carry. No impact to customer
-    // builds.
-    case enforceEnvironment
-
-    // Unused by privatecloudcomputed. The flag itself remains enabled in
-    // our plist because it is still being read by CloudAttestation and
-    // Transparency. We can presumably delete it at some point when pccd
-    // is fully in control of environments.
-    case productionEnvironmentAvailable
-    package var domain: StaticString {
-        return "PrivateCloudCompute"
-    }
-    package var feature: StaticString {
-        switch self {
-        case .enforceEnvironment: return "enforceEnvironment"
-        case .productionEnvironmentAvailable: return "productionEnvironmentAvailable"
-        }
-    }
-}
 
 package enum TC2EnvironmentNames: String {
     case production = "production"

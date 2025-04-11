@@ -21,6 +21,8 @@ import Foundation
 
 // MARK: - DIAVLO Request
 /*
+    Expected serialization docs can be found here:
+     
     Request V0:
     {
         "audienceProperties":

@@ -60,7 +60,7 @@ extension VRE {
             }
 
             init(asset: SWReleaseMetadata.Asset) {
-                self.type = SWReleaseMetadata.assetTypeName(asset.type)
+                self.type = asset.type.label
                 self.file = FileManager.fileURL(asset.url).lastPathComponent
                 self.variant = asset.variant
             }
@@ -143,8 +143,8 @@ extension VRE {
         }
 
         // lookupAssetType returns first releaseAsset entry matching asset type
-        func lookupAssetType(type: SWReleaseMetadata.AssetType) -> ReleaseAsset? {
-            return self.releaseAssets.first(where: { $0.type == SWReleaseMetadata.assetTypeName(type) })
+        func lookupAssetType(_ type: SWReleaseMetadata.AssetType) -> ReleaseAsset? {
+            return self.releaseAssets.first(where: { $0.type == type.label })
         }
     }
 }

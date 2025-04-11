@@ -18,58 +18,145 @@
 //
 //  Created by Marco Magdy on 03/05/2024
 //
+// The config writer generates the config file which is used by splunkloggingd.
+//
+// The config writer first uses CFPrefs to retrieve the preferences
+// It stores these in the file at the given output path.
+//
+// The file contains the predicates which are used by splunkloggingd
+// for filtering log messages.
+//
+// The config writer then subscribes to any changes to the predicates
+// using FastConfig. If there is any update in the predicates, it
+// overrides the predicates in the output file with the latest ones
+// received from FastConfig.
+//
+// If the FastConfig property is subsequently removed, the config
+// writer will revert back to the CFPrefs predicates.
 
 import Foundation
 import OSLog
 import cloudOSInfo
+import CloudBoardPreferences
 
-internal let kDomain = "com.apple.prcos.splunkloggingd" as CFString
+internal let kDomain = "com.apple.prcos.splunkloggingd"
 
 private let logger = Logger(subsystem: "SplunkloggingdConfigWriter", category: "")
 
+internal struct SplunkLoggingdHotProperties: Decodable, Sendable, Hashable {
+    /// This must match the name used in the upstream configuration service.
+    static let domain: String = "com.apple.cloudos.hotproperties.splunkloggingd"
+
+    public var predicates: [String]?
+}
+
 @main
 class SplunkloggingdConfigWriter {
-    static func main() {
+    static func main() async throws {
+        // Hop off the main actor
+        try await run()
+    }
+
+    static func run() async throws {
         // First command line argument is the path to the output configuration file
         if CommandLine.argc != 2 {
             logger.error("Usage: SplunkloggingdConfigWriter <output file>")
             exit(1)
         }
         let outputFile = CommandLine.arguments[1]
+        // Get the static configuration from CFPrefs.
         let config = readConfig()
-        if config == nil {
+        guard let config = config else {
             logger.error("Failed to read configuration. No files will be written.")
             exit(1)
         }
-
-        // Write the configuration to a plist file
-        let url = URL(fileURLWithPath: outputFile)
-        // Create the directory if it doesn't exist
-        let directory = url.deletingLastPathComponent()
+        // Create config file using CFPrefs.
+        if (!FileManager.default.fileExists(atPath: outputFile)) {
+            writeOutputFile(config: config, outputFile)
+        }
+        let cloudOSInfoProvider = CloudOSInfoProvider()
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+            guard try cloudOSInfoProvider.cloudOSReleaseType().lowercased().starts(with: "private cloudos") else {
+                logger.log("Release type is not Private cloudOS. Exiting.")
+                return
+            }
         } catch {
-            logger.error("Failed to create directory \(directory.path). \(error)")
-            exit(1)
+            logger.error("Failed to get release type: \(error)")
+            return
         }
 
-        do {
-            let encoder = PropertyListEncoder()
-            encoder.outputFormat = .xml
-            let data = try encoder.encode(config)
-            try data.write(to: url)
-        } catch {
-            logger.error("Failed to write configuration to file. \(error)")
-            exit(1)
+        logger.log("Release type is Private cloudOS. Attempting to listen to hot properties.")
+
+        // Store predicates from CFPrefs as fallback
+        let staticPredicates = config.predicates
+
+        // Listen for predicate changes from FastConfig
+        // Will retry 10 times if the Preference Framework
+        // Async Stream throws
+        for attemptCount in 1...10 {
+            let preferencesUpdates = PreferencesUpdates(
+                preferencesDomain: SplunkLoggingdHotProperties.domain,
+                maximumUpdateDuration: .seconds(1),
+                forType: SplunkLoggingdHotProperties.self
+            )
+            do {
+                for try await update in preferencesUpdates {
+                    await update.applyingPreferences { newPreference in
+                        if let newPredicates = newPreference.predicates {
+                            logger.log("Received predicates from hot properties: \(newPredicates)")
+                            config.predicates = newPredicates
+                        } else {
+                            logger.log("No hot properties set. Reverting to CFPrefs predicates: \(staticPredicates)")
+                            config.predicates = staticPredicates
+                        }
+                        writeOutputFile(config: config, outputFile)
+                    }
+                }
+            } catch {
+                logger.error("""
+                    Preferences framework closed stream with error: \
+                    \(error.localizedDescription).
+                    """)
+                if attemptCount < 10 {
+                    logger.log("Will retry listening FastConfig updates in 60 seconds")
+                    try await Task.sleep(for: .seconds(60))
+                }
+                else {
+                    logger.error("Ran out of retries to subscribe to FastConfig. Exiting")
+                    exit(1)
+                }
+            }
         }
-        logger.info("Configuration written to \(url.path)")
     }
+}
+
+private func writeOutputFile(config: SplunkloggingdConfiguration, _ path: String) {
+    let url = URL(fileURLWithPath: path)
+    // Create the directory if it doesn't exist
+    let directory = url.deletingLastPathComponent()
+    do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+    } catch {
+        logger.error("Failed to create directory \(directory.path). \(error)")
+        exit(1)
+    }
+
+    do {
+        let encoder = PropertyListEncoder()
+        encoder.outputFormat = .xml
+        let data = try encoder.encode(config)
+        try data.write(to: url)
+    } catch {
+        logger.error("Failed to write configuration to file. \(error)")
+        exit(1)
+    }
+    logger.log("Configuration written to \(url.path)")
 }
 
 private func readConfig() -> SplunkloggingdConfiguration? {
     let result = SplunkloggingdConfiguration()
     // Read the server name
-    let server = CFPreferencesCopyValue("Server" as CFString, kDomain, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
+    let server = CFPreferencesCopyValue("Server" as CFString, kDomain as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
     guard server != nil else {
         logger.error("Failed to read server from configuration. server is nil.")
         return nil
@@ -82,7 +169,7 @@ private func readConfig() -> SplunkloggingdConfiguration? {
     result.server = server
 
     // Read the index name
-    let indexName = CFPreferencesCopyValue("Index" as CFString, kDomain, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
+    let indexName = CFPreferencesCopyValue("Index" as CFString, kDomain as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
     guard indexName != nil else {
         logger.error("Failed to read index from configuration. index is nil.")
         return nil
@@ -95,13 +182,13 @@ private func readConfig() -> SplunkloggingdConfiguration? {
     result.indexName = indexName
 
     // Read the token
-    let token = CFPreferencesCopyValue("Token" as CFString, kDomain, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
+    let token = CFPreferencesCopyValue("Token" as CFString, kDomain as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
     if let token = token as? String {
         result.token = token
     }
 
     // Read the buffer size
-    let bufferSize = CFPreferencesCopyValue("BufferSize" as CFString, kDomain, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
+    let bufferSize = CFPreferencesCopyValue("BufferSize" as CFString, kDomain as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
     if bufferSize != nil {
         guard let bufferSize = bufferSize as? NSNumber else {
             logger.error("Failed to read buffer size from configuration. bufferSize is not a number.")
@@ -111,7 +198,7 @@ private func readConfig() -> SplunkloggingdConfiguration? {
     }
 
     // Read the predicates array
-    let predicates = CFPreferencesCopyValue("Predicates" as CFString, kDomain, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
+    let predicates = CFPreferencesCopyValue("Predicates" as CFString, kDomain as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
     guard predicates != nil else {
         logger.error("Failed to read predicates from configuration. predicates is nil.")
         return nil

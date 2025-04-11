@@ -19,14 +19,12 @@
 //  Created by Andrea Guzzo on 8/25/22
 //
 
-@_exported import CloudMetricsFramework
-import NIO
-import os
-#if canImport(SecureConfigDB)
-@_weakLinked import SecureConfigDB
-#endif
-
-private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "Daemon")
+internal import CloudMetricsConstants
+package import CloudMetricsHealthFramework
+internal import CloudMetricsXPC
+internal import NIO
+internal import os
+private import OpenTelemetrySdk
 
 /// Setup the server along with all metric collection services.
 public final class CloudMetricsDaemon: Sendable {
@@ -36,72 +34,86 @@ public final class CloudMetricsDaemon: Sendable {
     /// Provides the XPC interface and passes data to the publisher
     private let cloudMetricsService: CloudMetricsService
     private let coreAnalyticsActivity: CoreAnalyticsActivity
-    
-    internal init(configurationFile: String?) async throws {
-        logger.info("configurationFile = \(configurationFile ?? "no configuration file specified")" )
+    private let certExpiryHandler: NICCertExpiryHandler
+    private let otlpMetricExporter: OTLPGRPCClient
+    private let configuration: Configuration
+    private let healthContinuation: AsyncStream<CloudMetricsHealthState>.Continuation
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "Daemon")
 
-        var auditLists: AuditListsPlist? = nil
-        do {
-            if #_hasSymbol(SecureConfigParameters.self) {
-                if let filteringEnforced = try SecureConfigParameters.loadContents().metricsFilteringEnforced {
-                    if filteringEnforced, let logPolicyPath: String = try SecureConfigParameters.loadContents().logPolicyPath {
-                        let plistPath = URL(filePath: "\(logPolicyPath)/metrics_audit_list.plist")
-                        let decoder = PropertyListDecoder()
-                        do {
-                            auditLists = try decoder.decode(
-                                AuditListsPlist.self,
-                                from: try Data(contentsOf: URL(filePath: plistPath.path()))
-                            )
-                        } catch {
-                            logger.error("Can't load the metrics audit list (\(plistPath)): \(error)")
-                        }
-                    }
-                }
-            }
-        } catch {
-            logger.error("Failed to access SecureConfig. Assuming it is not available on this environment.")
-        }
-
-        let configuration = try await CloudMetricsConfiguration(configurationFile: configurationFile, auditLists: auditLists)
+    /// Initialises the daemon from in-memory objects
+    ///
+    /// This method is preferable for testing.
+    package init(configuration: Configuration,
+                 healthContinuation: AsyncStream<CloudMetricsHealthState>.Continuation,
+                 xpcServiceName: String = kCloudMetricsXPCServiceName) {
+        self.configuration = configuration
+        self.healthContinuation = healthContinuation
         self.coreAnalyticsActivity = CoreAnalyticsActivity()
         let metricsFilter = MetricsFilter(configuration: configuration)
 
-        if configuration.useOpenTelemetry {
-            publisher = try OpenTelemetryPublisher(configuration: configuration, metricsFilter: metricsFilter)
-        } else {
-            #if DISABLE_MOSAIC
-            logger.info("Mosaic not supported at build time.")
-            throw ConfigurationError.MosaicNotSupported
-            #else
-            publisher = try MosaicPublisher(configuration: configuration, metricsFilter: metricsFilter)
-            #endif
-        }
-        cloudMetricsService = CloudMetricsService(
+        self.certExpiryHandler = NICCertExpiryHandler()
+
+        let (metricDataStream, metricDataContinuation) = AsyncStream<(Configuration.Destination, [StableMetricData])>.makeStream()
+
+        self.otlpMetricExporter = OTLPGRPCClient(
+            metricDataStream: metricDataStream,
+            tlsConfigStream: self.certExpiryHandler,
+            configuration: configuration,
+            healthContinuation: healthContinuation,
+            metricsFilter: metricsFilter)
+
+        self.publisher = OpenTelemetryPublisher(configuration: configuration,
+                                                metricsFilter: metricsFilter,
+                                                metricDataContinuation: metricDataContinuation)
+
+        self.cloudMetricsService = CloudMetricsService(
             manager: publisher,
             metricsFilter: metricsFilter
         )
-        cloudMetricsServer = CloudMetricsXPCServer.localListener(delegate: cloudMetricsService)
+        self.cloudMetricsServer = CloudMetricsXPCServer.localListener(delegate: cloudMetricsService,
+                                                                      xpcServiceName: xpcServiceName)
     }
 
     /// Calling main will setup all metrics and servers. This will block until
     /// an error or shutdown occurs.
-    public func run() async throws {
-        logger.debug("Registering CoreAnalyticsActivity")
+    package func run() async throws {
+        logger.log("Registering CoreAnalyticsActivity")
         self.coreAnalyticsActivity.registerActivity()
+        await self.cloudMetricsServer.listen()
 
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
-                logger.debug("Listening for xpc events")
-                await self.cloudMetricsServer.listen()
+                self.logger.log("Metric exporter starting")
+                defer {
+                    self.logger.log("Metric exporter stopped")
+                }
+                try await self.otlpMetricExporter.run()
             }
             group.addTask {
+                self.logger.log("Publisher starting")
+                defer {
+                    self.logger.log("Publisher stopped")
+                }
                 try await self.publisher.run()
             }
-            try await group.waitForAll()
+            if configuration.keySource == .keychain {
+                // Only run the cert expiry handler if we're going to load cers from keychain.
+                group.addTask {
+                    self.logger.log("Cert expiry handler starting")
+                    await self.certExpiryHandler.run()
+                    self.logger.log("Cert expiry handler stopped")
+                }
+            }
+            defer {
+                logger.log("Cancelling daemon children")
+                group.cancelAll()
+            }
+            try await group.next()
+            try Task.checkCancellation()
         }
     }
 
-    public func shutdown() async throws {
+    package func shutdown() async throws {
         self.coreAnalyticsActivity.flush()
         try await publisher.shutdown()
     }

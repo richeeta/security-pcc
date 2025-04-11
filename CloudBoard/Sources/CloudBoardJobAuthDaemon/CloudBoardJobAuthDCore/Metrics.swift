@@ -109,7 +109,7 @@ enum Metrics {
 
         struct SigningKeyTimeToExpiryGauge: Gauge {
             typealias KeyType = KeyRotationServiceClient.SigningKeyUseCase
-            static var label: MetricLabel = "\(prefix)_signing_key_time_to_expiry_seconds"
+            static let label: MetricLabel = "\(prefix)_signing_key_time_to_expiry_seconds"
 
             var dimensions: MetricDimensions<DimensionKeys>
             var value: Double

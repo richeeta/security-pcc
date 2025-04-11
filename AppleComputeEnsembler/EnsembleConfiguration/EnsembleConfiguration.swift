@@ -42,9 +42,7 @@ struct NodeConfiguration: CustomStringConvertible, Decodable, ReportableString {
 	let hostName: String?
 
 	var rank: Int {
-		get {
-			self._rank.rawValue
-		}
+		self._rank.rawValue
 	}
 
 	init(chassisID: String, rank: Rank, hostName: String?) {
@@ -56,28 +54,28 @@ struct NodeConfiguration: CustomStringConvertible, Decodable, ReportableString {
 	// This is OK to log publically because the private fields are obfuscated.
 	var publicDescription: String {
 		return """
-			{\
-			rank: \(self.rank), \
-			chassisID: %s, \
-			hostName: %s\
-			}
-			"""
+		{\
+		rank: \(self.rank), \
+		chassisID: %s, \
+		hostName: %s\
+		}
+		"""
 	}
 
 	var description: String {
 		return """
-			{\
-			rank: \(self.rank), \
-			chassisID: \(self.chassisID), \
-			hostName: \(String(describing: self.hostName))\
-			}
-			"""
+		{\
+		rank: \(self.rank), \
+		chassisID: \(self.chassisID), \
+		hostName: \(String(describing: self.hostName))\
+		}
+		"""
 	}
 
 	private enum CodingKeys: String, CodingKey {
-		case chassisID = "chassisID"
+		case chassisID
 		case _rank = "rank"
-		case hostName = "hostName"
+		case hostName
 	}
 }
 
@@ -90,17 +88,17 @@ struct EnsembleConfiguration: CustomStringConvertible, Decodable, ReportableStri
 	// This is OK to log publically because the private fields are obfuscated.
 	var publicDescription: String {
 		var desc = """
-			{
-				backendType: \(String(describing: self.backendType)),
-				hypercube: \(String(describing: self.hypercube)),
-				ensembleID: \(String(describing: self.ensembleID)),
-				nodes: [
-			"""
+		{
+			backendType: \(String(describing: self.backendType)),
+			hypercube: \(String(describing: self.hypercube)),
+			ensembleID: \(String(describing: self.ensembleID)),
+			nodes: [
+		"""
 		for (_, value) in self.nodes {
 			desc = """
-				\(desc)\n\
-				\t\t(key: "%s", value: \(value))
-				"""
+			\(desc)\n\
+			\t\t(key: "%s", value: \(value))
+			"""
 		}
 		desc = "\(desc)\n\t]]"
 		desc = "\(desc)\n}"
@@ -109,17 +107,17 @@ struct EnsembleConfiguration: CustomStringConvertible, Decodable, ReportableStri
 
 	var description: String {
 		var desc = """
-			{
-				backendType: \(String(describing: self.backendType)),
-				hypercube: \(String(describing: self.hypercube)),
-				ensembleID: \(String(describing: self.ensembleID)),
-				nodes: [
-			"""
+		{
+			backendType: \(String(describing: self.backendType)),
+			hypercube: \(String(describing: self.hypercube)),
+			ensembleID: \(String(describing: self.ensembleID)),
+			nodes: [
+		"""
 		for (key, value) in self.nodes {
 			desc = """
-				\(desc)\n\
-				\t\t(key: "\(key)", value: \(value))
-				"""
+			\(desc)\n\
+			\t\t(key: "\(key)", value: \(value))
+			"""
 		}
 		desc = "\(desc)\n\t]]"
 		desc = "\(desc)\n}"
@@ -127,10 +125,10 @@ struct EnsembleConfiguration: CustomStringConvertible, Decodable, ReportableStri
 	}
 
 	private enum CodingKeys: String, CodingKey {
-		case backendType = "backendType"
-		case hypercube = "hypercube"
+		case backendType
+		case hypercube
 		case ensembleID = "ensemble_id"
-		case nodes = "nodes"
+		case nodes
 	}
 }
 

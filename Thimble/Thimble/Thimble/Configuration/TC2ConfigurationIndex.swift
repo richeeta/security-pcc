@@ -21,8 +21,6 @@
 
 package enum TC2ClientConfigurationKey: String, CaseIterable {
     case environment
-    case customEnvironmentURL
-    case customEnvironmentHost
     case ignoreCertificateErrors
     case rateLimitRequestTimeout
     case rateLimitRequestPath
@@ -83,10 +81,6 @@ extension TC2ConfigurationIndex: Sendable where Value: Sendable {
 extension TC2ConfigurationIndex {
     /// The environment to use. This defaults to "" to allow automatically picking carry vs. production.
     package static var environment: TC2ConfigurationIndex<String?> { .init(key: .environment, nil) }
-
-    /// If set, this overrides the environment to use with a specific hostname.
-    package static var customEnvironmentURL: TC2ConfigurationIndex<String?> { .init(key: .customEnvironmentURL, nil) }
-    package static var customEnvironmentHost: TC2ConfigurationIndex<String?> { .init(key: .customEnvironmentHost, nil) }
 
     package static var ignoreCertificateErrors: TC2ConfigurationIndex<Bool> { .init(key: .ignoreCertificateErrors, false) }
 

@@ -25,14 +25,14 @@ import FeatureFlags
 import Foundation
 import PrivateCloudCompute
 
-private let logger = tc2Logger(forCategory: .Configuration)
+private let logger = tc2Logger(forCategory: .configuration)
 
 // Extends the TC2Configuration protocol to add environment selection logic.
 extension TC2Configuration {
-    package var environment: TC2Environment {
+    package func environment(systemInfo: SystemInfoProtocol) -> TC2Environment {
         let result: TC2Environment
         if os_variant_allows_internal_security_policies(privateCloudComputeOsVariantSubsystem) {
-            result = self.internalEnvironment
+            result = self.internalEnvironment(systemInfo: systemInfo)
         } else {
             result = self.customerEnvironment
         }
@@ -55,27 +55,14 @@ extension TC2Configuration {
         return result
     }
 
-    package var internalEnvironment: TC2Environment {
+    package func internalEnvironment(systemInfo: SystemInfoProtocol) -> TC2Environment {
         precondition(os_variant_allows_internal_security_policies(privateCloudComputeOsVariantSubsystem))
 
-        return self.configuredEnvironment ?? self.devicePreferredLiveOnEnvironment
+        return self.configuredEnvironment ?? self.devicePreferredLiveOnEnvironment(systemInfo: systemInfo)
     }
 
     package var configuredEnvironment: TC2Environment? {
         precondition(os_variant_allows_internal_security_policies(privateCloudComputeOsVariantSubsystem))
-
-        if isFeatureEnabled(TC2EnvironmentFlags.enforceEnvironment) {
-            logger.debug("TC2Configuration ff enforceEnvironment, no environment configured")
-            return nil
-        }
-
-        if let customEnvironmentHost = self[.customEnvironmentHost] {
-            logger.warning("TC2Configuration ignored unsupported customEnvironmentHost=\(customEnvironmentHost)")
-        }
-
-        if let customEnvironmentURL = self[.customEnvironmentURL] {
-            logger.warning("TC2Configuration ignored unsupported customEnvironmentURL=\(customEnvironmentURL)")
-        }
 
         guard let environmentName = self[.environment] else {
             logger.debug("TC2Configuration defaults absent, no environment configured")
@@ -92,7 +79,7 @@ extension TC2Configuration {
 
     }
 
-    private var devicePreferredLiveOnEnvironment: TC2Environment {
+    private func devicePreferredLiveOnEnvironment(systemInfo: SystemInfoProtocol) -> TC2Environment {
         precondition(os_variant_allows_internal_security_policies(privateCloudComputeOsVariantSubsystem))
 
         if !os_variant_has_internal_content(privateCloudComputeOsVariantSubsystem) {
@@ -107,7 +94,7 @@ extension TC2Configuration {
         // At this point, we are on an internal build, so we need to figure out
         // the spillover value and default to carry.
 
-        let bootSessionID = SystemInfo().bootSessionID
+        let bootSessionID = systemInfo.bootSessionID
         if let bootFixedEnv = self[.bootFixedLiveOnEnvironment] {
             let split = bootFixedEnv.split(separator: ",", maxSplits: 1)
             if split.count == 2 {
@@ -122,13 +109,13 @@ extension TC2Configuration {
                         logger.info("TC2Configuration agrees with current boot's selection, environment=\(environment, privacy: .public)")
                         return result
                     } else {
-                        logger.warning("TC2Configuration saw bootFixedLiveOnEnvironment with invalid environment, ignoring")
+                        logger.error("TC2Configuration saw bootFixedLiveOnEnvironment with invalid environment, ignoring")
                     }
                 } else {
                     logger.debug("TC2Configuration saw bootFixedLiveOnEnvironment from previous boot, ignoring")
                 }
             } else {
-                logger.warning("TC2Configuration saw invalid bootFixedLiveOnEnvironment=\(bootFixedEnv)")
+                logger.error("TC2Configuration saw invalid bootFixedLiveOnEnvironment=\(bootFixedEnv)")
             }
         } else {
             logger.debug("TC2Configuration does not see bootFixedLiveOnEnvironment")
@@ -144,7 +131,7 @@ extension TC2Configuration {
                 self.writeBootFixedLiveOnEnvironment(bootSessionID: bootSessionID, environment: proposal)
                 return result
             } else {
-                logger.warning("TC2Configuration saw invalid proposed environment=\(proposal, privacy: .public), ignoring")
+                logger.error("TC2Configuration saw invalid proposed environment=\(proposal, privacy: .public), ignoring")
             }
         } else {
             logger.debug("TC2Configuration does not see proposedEnvironment")

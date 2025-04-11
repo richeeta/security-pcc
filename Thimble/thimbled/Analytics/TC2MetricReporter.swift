@@ -41,7 +41,7 @@ extension TC2CloudTelemetryReportable {
 
 struct TC2MetricReporter {
     let cloudTelemetryTeamID = "63QTMWFK24"
-    let logger = tc2Logger(forCategory: .MetricReporter)
+    let logger = tc2Logger(forCategory: .metricReporter)
 
     func reportCloudTelemetryMetric(metric: some TC2CloudTelemetryReportable) async {
         do {

@@ -26,8 +26,8 @@ import os
 /// Job manager responsible for the communication with privatecloudcomputed on the client and unwrapping/wrapping the
 /// application request and response payloads to and from the workload respectively.
 final class WorkloadJobManager {
-    private typealias PrivateCloudComputeRequest = Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeRequest
-    private typealias PrivateCloudComputeResponse = Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeResponse
+    private typealias PrivateCloudComputeRequest = Proto_PrivateCloudCompute_PrivateCloudComputeRequest
+    private typealias PrivateCloudComputeResponse = Proto_PrivateCloudCompute_PrivateCloudComputeResponse
 
     private static let logger: Logger = .init(
         subsystem: "com.apple.cloudos.cloudboard",
@@ -37,13 +37,12 @@ final class WorkloadJobManager {
     private let requestStream: AsyncStream<PipelinePayload<Data>>
     private let responseContinuation: AsyncStream<FinalizableChunk<Data>>.Continuation
     private let cloudAppRequestContinuation: AsyncStream<PipelinePayload<Data>>.Continuation
-    private let cloudAppResponseStream: AsyncThrowingStream<CloudAppResponse, Error>
-    private let cloudAppResponseContinuation: AsyncThrowingStream<CloudAppResponse, Error>.Continuation
 
     private let jobUUID: UUID
     private let uuid: UUID
     private var stateMachine: WorkloadJobStateMachine
     private var buffer: LengthPrefixBuffer
+    private let workload: CloudAppWorkloadProtocol
 
     /// The metrics system to use.
     private let metrics: MetricsSystem
@@ -60,16 +59,14 @@ final class WorkloadJobManager {
         maxRequestMessageSize: Int,
         responseContinuation: AsyncStream<FinalizableChunk<Data>>.Continuation,
         cloudAppRequestContinuation: AsyncStream<PipelinePayload<Data>>.Continuation,
-        cloudAppResponseStream: AsyncThrowingStream<CloudAppResponse, Error>,
-        cloudAppResponseContinuation: AsyncThrowingStream<CloudAppResponse, Error>.Continuation,
+        workload: CloudAppWorkloadProtocol,
         metrics: MetricsSystem,
         jobUUID: UUID
     ) {
         self.requestStream = requestStream
         self.responseContinuation = responseContinuation
         self.cloudAppRequestContinuation = cloudAppRequestContinuation
-        self.cloudAppResponseStream = cloudAppResponseStream
-        self.cloudAppResponseContinuation = cloudAppResponseContinuation
+        self.workload = workload
         self.metrics = metrics
 
         self.jobUUID = jobUUID
@@ -94,9 +91,9 @@ final class WorkloadJobManager {
                         self.requestMessageCount.withLock {
                             $0 += 1
                         }
-                        try self.receivePipelineMessage(message)
+                        try await self.receivePipelineMessage(message)
                     }
-                    WorkloadJobManagerCheckpoint(
+                    await WorkloadJobManagerCheckpoint(
                         logMetadata: self.logMetadata(),
                         requestMessageCount: self.requestMessageCount.withLock { $0 },
                         responseMessageCount: self.responseMessageCount.withLock { $0 },
@@ -104,177 +101,121 @@ final class WorkloadJobManager {
                     ).log(to: Self.logger, level: .default)
                     try self.stateMachine.terminate()
                 } catch {
-                    WorkloadJobManagerCheckpoint(
+                    await WorkloadJobManagerCheckpoint(
                         logMetadata: self.logMetadata(),
                         requestMessageCount: self.requestMessageCount.withLock { $0 },
                         responseMessageCount: self.responseMessageCount.withLock { $0 },
                         message: "Error handling request stream",
                         error: error
                     ).log(to: Self.logger, level: .error)
-                    // Inject error into response stream to be handled there
-                    self.cloudAppResponseContinuation.finish(throwing: error)
+                    do {
+                        // If input stream failed, signal end of input stream to the workload.
+                        // The error is expected to be sent back in the response stream
+                        try await self.workload.endOfInput(error: error)
+                    } catch {}
                 }
             }
 
             group.addTask {
-                var requestSummary = CloudBoardJobHelperRequestSummary(jobUUID: self.jobUUID)
-                defer {
-                    self.requestPlaintextMetadata.map { requestSummary.populateRequestMetadata($0) }
-                    requestSummary.startTimeNanos = self.requestParametersReceivedInstant
-                    requestSummary.endTimeNanos = RequestSummaryClock.now
-                    requestSummary.requestMessageCount = self.requestMessageCount.withLock { $0 }
-                    requestSummary.responseMessageCount = self.responseMessageCount.withLock { $0 }
-                    if requestSummary.requestMessageCount > 0 {
-                        if requestSummary.responseMessageCount > 0 {
-                            self.metrics.emit(Metrics.WorkloadManager.TotalResponsesSentCounter(action: .increment))
-                            if let error = requestSummary.error {
-                                self.metrics.emit(Metrics.WorkloadManager.FailureResponsesSentCounter.Factory().make(error))
-                                // requestDuration should always be set here, but prefer not to crash for telemetry
-                                if let durationMicros = requestSummary.durationMicros {
-                                    self.metrics.emit(
-                                        Metrics.WorkloadManager.WorkloadDurationFromFirstRequestMessage(
-                                            duration: .microseconds(durationMicros),
-                                            error: error
-                                        )
-                                    )
-                                } else {
-                                    WorkloadJobManagerCheckpoint(
-                                        logMetadata: self.logMetadata(),
-                                        requestMessageCount: self.requestMessageCount.withLock { $0 },
-                                        responseMessageCount: self.responseMessageCount.withLock { $0 },
-                                        message: "Failed to report workload duration metric - duration was nil",
-                                        error: error
-                                    ).log(to: Self.logger, level: .error)
-                                }
-                            } else {
-                                self.metrics.emit(Metrics.WorkloadManager.SuccessResponsesSentCounter(action: .increment))
-                                // requestDuration should always be set here, but prefer not to crash for telemetry
-                                if let durationMicros = requestSummary.durationMicros {
-                                    self.metrics.emit(
-                                        Metrics.WorkloadManager.WorkloadDurationFromFirstRequestMessage(
-                                            duration: .microseconds(durationMicros),
-                                            error: nil
-                                        )
-                                    )
-                                } else {
-                                    WorkloadJobManagerCheckpoint(
-                                        logMetadata: self.logMetadata(),
-                                        requestMessageCount: self.requestMessageCount.withLock { $0 },
-                                        responseMessageCount: self.responseMessageCount.withLock { $0 },
-                                        message: "Failed to report workload duration metric - duration was nil"
-                                    ).log(to: Self.logger, level: .error)
-                                }
-                            }
-                        } else { // no response sent, but an error recorded
-                            if let error = requestSummary.error {
-                                self.metrics.emit(Metrics.WorkloadManager.OverallErrorCounter.Factory().make(error))
-                            } else {
-                                let error = WorkloadJobManagerNoResponseSentError()
-                                requestSummary.populate(error: error)
-                                self.metrics.emit(Metrics.WorkloadManager.OverallErrorCounter.Factory().make(error))
-                            }
-                        }
-                    } else {
-                        self.metrics.emit(Metrics.WorkloadManager.UnusedTerminationCounter(action: .increment))
+                await self.withCloudBoardJobHelperRequestSummary(jobUUID: self.jobUUID) {
+                    defer {
+                        self.responseContinuation.finish()
                     }
-                    requestSummary.log(to: Self.logger)
-                }
-                defer {
-                    self.responseContinuation.finish()
-                }
-                do {
-                    WorkloadJobManagerCheckpoint(
-                        logMetadata: self.logMetadata(),
-                        requestMessageCount: self.requestMessageCount.withLock { $0 },
-                        responseMessageCount: self.responseMessageCount.withLock { $0 },
-                        message: "Sending back response UUID"
-                    ).log(to: Self.logger, level: .default)
-                    try self.responseContinuation.yield(.init(chunk: self.uuidChunk()))
+                    do {
+                        await WorkloadJobManagerCheckpoint(
+                            logMetadata: self.logMetadata(),
+                            requestMessageCount: self.requestMessageCount.withLock { $0 },
+                            responseMessageCount: self.responseMessageCount.withLock { $0 },
+                            message: "Sending back response UUID"
+                        ).log(to: Self.logger, level: .default)
+                        try self.responseContinuation.yield(.init(chunk: self.uuidChunk()))
 
-                    // Wait for workload responses, encode them, and forward them
-                    var requestDiagnostics = false
-                    for try await response in self.cloudAppResponseStream {
-                        let responseMessagesReceived = self.responseMessageCount.withLock {
-                            $0 += 1
-                            return $0
-                        }
-                        switch response {
-                        case .chunk(let data):
-                            // downsample the checkpoints we log for response chunks
-                            if responseMessagesReceived <= 2 || responseMessagesReceived % 100 == 0 {
-                                WorkloadJobManagerCheckpoint(
+                        // Wait for workload responses, encode them, and forward them
+                        var uncleanAppTermination = false
+                        for try await response in self.workload.responseStream {
+                            let responseMessagesReceived = self.responseMessageCount.withLock {
+                                $0 += 1
+                                return $0
+                            }
+
+                            switch response {
+                            case .chunk(let data):
+                                // downsample the checkpoints we log for response chunks
+                                if responseMessagesReceived <= 2 || responseMessagesReceived % 100 == 0 {
+                                    await WorkloadJobManagerCheckpoint(
+                                        logMetadata: self.logMetadata(),
+                                        requestMessageCount: self.requestMessageCount.withLock { $0 },
+                                        responseMessageCount: self.responseMessageCount.withLock { $0 },
+                                        message: "Received cloud app response"
+                                    ).log(to: Self.logger, level: .default)
+                                }
+                                var serializedResponse = try PrivateCloudComputeResponse.with {
+                                    $0.type = .responsePayload(data)
+                                }.serializedData()
+                                serializedResponse.prependLength()
+                                self.responseContinuation.yield(.init(chunk: serializedResponse))
+                            case .appTermination(let terminationMetadata):
+                                await WorkloadJobManagerCheckpoint(
                                     logMetadata: self.logMetadata(),
                                     requestMessageCount: self.requestMessageCount.withLock { $0 },
                                     responseMessageCount: self.responseMessageCount.withLock { $0 },
-                                    message: "Received cloud app response"
-                                ).log(to: Self.logger, level: .default)
+                                    message: "Received cloud app termination metadata"
+                                ).logAppTermination(
+                                    terminationMetadata: terminationMetadata,
+                                    to: Self.logger,
+                                    level: .default
+                                )
+
+                                if let statusCode = terminationMetadata.statusCode, statusCode != 0 {
+                                    uncleanAppTermination = true
+                                }
                             }
-                            var serializedResponse = try PrivateCloudComputeResponse.with {
-                                $0.type = .responsePayload(data)
-                            }.serializedData()
-                            serializedResponse.prependLength()
-                            self.responseContinuation.yield(.init(chunk: serializedResponse))
-                        case .appTermination(let terminationMetadata):
-                            WorkloadJobManagerCheckpoint(
+                        }
+
+                        await WorkloadJobManagerCheckpoint(
+                            logMetadata: self.logMetadata(),
+                            requestMessageCount: self.requestMessageCount.withLock { $0 },
+                            responseMessageCount: self.responseMessageCount.withLock { $0 },
+                            message: "Cloud app response stream finished"
+                        ).log(to: Self.logger, level: .default)
+
+                        do {
+                            try self.responseContinuation.yield(.init(
+                                chunk: self.responseSummaryChunk(uncleanAppTermination: uncleanAppTermination),
+                                isFinal: true
+                            ))
+                        } catch {
+                            await WorkloadJobManagerCheckpoint(
                                 logMetadata: self.logMetadata(),
                                 requestMessageCount: self.requestMessageCount.withLock { $0 },
                                 responseMessageCount: self.responseMessageCount.withLock { $0 },
-                                message: "Received cloud app termination metadata"
-                            ).logAppTermination(
-                                terminationMetadata: terminationMetadata,
-                                to: Self.logger,
-                                level: .default
-                            )
-
-                            if let statusCode = terminationMetadata.statusCode, statusCode != 0 {
-                                requestDiagnostics = true
-                            }
+                                message: "Failed to send response summary",
+                                error: error
+                            ).log(to: Self.logger, level: .error)
                         }
-                    }
-
-                    WorkloadJobManagerCheckpoint(
-                        logMetadata: self.logMetadata(),
-                        requestMessageCount: self.requestMessageCount.withLock { $0 },
-                        responseMessageCount: self.responseMessageCount.withLock { $0 },
-                        message: "Cloud app response stream finished"
-                    ).log(to: Self.logger, level: .default)
-
-                    do {
-                        try self.responseContinuation.yield(.init(
-                            chunk: self.responseSummaryChunk(requestDiagnostics: requestDiagnostics),
-                            isFinal: true
-                        ))
+                        self.metrics.emit(Metrics.WorkloadManager.SuccessResponsesSentCounter(action: .increment))
                     } catch {
-                        WorkloadJobManagerCheckpoint(
+                        await WorkloadJobManagerCheckpoint(
                             logMetadata: self.logMetadata(),
                             requestMessageCount: self.requestMessageCount.withLock { $0 },
                             responseMessageCount: self.responseMessageCount.withLock { $0 },
-                            message: "Failed to send response summary",
+                            message: "Error while processing request",
                             error: error
                         ).log(to: Self.logger, level: .error)
-                    }
-                    self.metrics.emit(Metrics.WorkloadManager.SuccessResponsesSentCounter(action: .increment))
-                } catch {
-                    requestSummary.populate(error: error)
-                    WorkloadJobManagerCheckpoint(
-                        logMetadata: self.logMetadata(),
-                        requestMessageCount: self.requestMessageCount.withLock { $0 },
-                        responseMessageCount: self.responseMessageCount.withLock { $0 },
-                        message: "Error while processing request",
-                        error: error
-                    ).log(to: Self.logger, level: .error)
-                    do {
-                        try self.responseContinuation.yield(
-                            .init(chunk: self.errorResponseSummaryChunk(for: error), isFinal: true)
-                        )
-                    } catch {
-                        WorkloadJobManagerCheckpoint(
-                            logMetadata: self.logMetadata(),
-                            requestMessageCount: self.requestMessageCount.withLock { $0 },
-                            responseMessageCount: self.responseMessageCount.withLock { $0 },
-                            message: "Unexpectedly failed to serialize error response. Not sending error response summary",
-                            error: error
-                        ).log(to: Self.logger, level: .error)
+                        do {
+                            try self.responseContinuation.yield(
+                                .init(chunk: self.errorResponseSummaryChunk(for: error), isFinal: true)
+                            )
+                        } catch {
+                            await WorkloadJobManagerCheckpoint(
+                                logMetadata: self.logMetadata(),
+                                requestMessageCount: self.requestMessageCount.withLock { $0 },
+                                responseMessageCount: self.responseMessageCount.withLock { $0 },
+                                message: "Unexpectedly failed to serialize error response. Not sending error response summary",
+                                error: error
+                            ).log(to: Self.logger, level: .error)
+                        }
+                        throw error
                     }
                 }
             }
@@ -283,41 +224,52 @@ final class WorkloadJobManager {
         }
     }
 
-    private func receivePipelineMessage(_ pipelineMessage: PipelinePayload<Data>) throws {
+    private func receivePipelineMessage(_ pipelineMessage: PipelinePayload<Data>) async throws {
         self.metrics.emit(Metrics.WorkloadManager.TotalRequestsReceivedCounter(action: .increment))
-        // logged via defer block to allow for metadata like requestId to be populated from received messages
-        defer {
-            WorkloadJobManagerCheckpoint(
+        do {
+            switch pipelineMessage {
+            case .warmup(let warmupData):
+                self.cloudAppRequestContinuation.yield(.warmup(warmupData))
+            case .oneTimeToken(let token):
+                try self.stateMachine.receiveOneTimeToken(token)
+            case .parameters(let parametersData):
+                self.requestParametersReceivedInstant = RequestSummaryClock.now
+                self.requestPlaintextMetadata = parametersData.plaintextMetadata
+                self.stateMachine.receiveRequestID(requestID: parametersData.plaintextMetadata.requestID)
+                self.cloudAppRequestContinuation.yield(.parameters(parametersData))
+            case .chunk(let finalizableChunk):
+                try await self.receiveEncodedRequest(finalizableChunk)
+            case .endOfInput:
+                // Unexpected, ``endOfInput`` is only used between
+                // ``WorkloadJobManager`` and the cloud app in response to
+                // an encoded request with PrivateCloudCompute.FinalMessage.
+                ()
+            case .abandon:
+                self.stateMachine.abandon()
+                self.cloudAppRequestContinuation.yield(.abandon)
+            case .teardown:
+                self.cloudAppRequestContinuation.yield(.teardown)
+            }
+        } catch {
+            await WorkloadJobManagerCheckpoint(
                 logMetadata: self.logMetadata(),
                 requestMessageCount: self.requestMessageCount.withLock { $0 },
                 responseMessageCount: self.responseMessageCount.withLock { $0 },
                 message: "received pipeline message"
             ).logReceiveRequestPipelineMessage(pipelineMessage: pipelineMessage, to: Self.logger, level: .default)
+            throw error
         }
-        switch pipelineMessage {
-        case .warmup(let warmupData):
-            self.cloudAppRequestContinuation.yield(.warmup(warmupData))
-        case .oneTimeToken(let token):
-            try self.stateMachine.receiveOneTimeToken(token)
-        case .parameters(let parametersData):
-            self.requestParametersReceivedInstant = RequestSummaryClock.now
-            self.requestPlaintextMetadata = parametersData.plaintextMetadata
-            self.stateMachine.receiveRequestID(requestID: parametersData.plaintextMetadata.requestID)
-            self.cloudAppRequestContinuation.yield(.parameters(parametersData))
-        case .chunk(let finalizableChunk):
-            try self.receiveEncodedRequest(finalizableChunk)
-        case .endOfInput:
-            // Unexpected, ``endOfInput`` is only used between ``WorkloadJobManager`` and the cloud app in response to
-            // an encoded request with PrivateCloudCompute.FinalMessage.
-            ()
-        case .teardown:
-            self.cloudAppRequestContinuation.yield(.teardown)
-        }
+        await WorkloadJobManagerCheckpoint(
+            logMetadata: self.logMetadata(),
+            requestMessageCount: self.requestMessageCount.withLock { $0 },
+            responseMessageCount: self.responseMessageCount.withLock { $0 },
+            message: "received pipeline message"
+        ).logReceiveRequestPipelineMessage(pipelineMessage: pipelineMessage, to: Self.logger, level: .default)
     }
 
-    private func receiveEncodedRequest(_ encodedRequestChunk: FinalizableChunk<Data>) throws {
+    private func receiveEncodedRequest(_ encodedRequestChunk: FinalizableChunk<Data>) async throws {
         for chunk in try self.buffer.append(encodedRequestChunk) {
-            switch try PrivateCloudComputeRequest(serializedData: chunk.chunk).type {
+            switch try PrivateCloudComputeRequest(serializedBytes: chunk.chunk).type {
             case .applicationPayload(let payload):
                 if let cloudAppRequest = stateMachine.receiveChunk(FinalizableChunk(
                     chunk: payload,
@@ -326,7 +278,7 @@ final class WorkloadJobManager {
                     self.cloudAppRequestContinuation.yield(.chunk(cloudAppRequest))
                 }
             case .authToken(let token):
-                WorkloadJobManagerCheckpoint(
+                await WorkloadJobManagerCheckpoint(
                     logMetadata: self.logMetadata(),
                     requestMessageCount: self.requestMessageCount.withLock { $0 },
                     responseMessageCount: self.responseMessageCount.withLock { $0 },
@@ -342,9 +294,9 @@ final class WorkloadJobManager {
                     }
                 }
             case .finalMessage:
-                // This is a message without payload allowing privatecloudcomputed to explicitly indicate the end of the
-                // request stream
-                WorkloadJobManagerCheckpoint(
+                // This is a message without payload allowing thimbled to explicitly indicate the end of the request
+                // stream
+                await WorkloadJobManagerCheckpoint(
                     logMetadata: self.logMetadata(),
                     requestMessageCount: self.requestMessageCount.withLock { $0 },
                     responseMessageCount: self.responseMessageCount.withLock { $0 },
@@ -352,7 +304,7 @@ final class WorkloadJobManager {
                 ).log(to: Self.logger, level: .default)
                 self.cloudAppRequestContinuation.yield(.endOfInput)
             case .none:
-                WorkloadJobManagerCheckpoint(
+                await WorkloadJobManagerCheckpoint(
                     logMetadata: self.logMetadata(),
                     requestMessageCount: self.requestMessageCount.withLock { $0 },
                     responseMessageCount: self.responseMessageCount.withLock { $0 },
@@ -371,14 +323,16 @@ final class WorkloadJobManager {
         return serialized
     }
 
-    func responseSummaryChunk(requestDiagnostics: Bool) throws -> Data {
+    func responseSummaryChunk(uncleanAppTermination: Bool) throws -> Data {
         let summary: PrivateCloudComputeResponse = .with {
             $0.responseSummary = .with {
-                $0.responseStatus = .ok
-                if requestDiagnostics {
+                if uncleanAppTermination {
+                    $0.responseStatus = .internalError
                     $0.postResponseActions = .with {
-                        $0.requestDiagnostics = requestDiagnostics
+                        $0.requestDiagnostics = true
                     }
+                } else {
+                    $0.responseStatus = .ok
                 }
             }
         }
@@ -396,6 +350,83 @@ final class WorkloadJobManager {
         var serializedResult = try summary.serializedData()
         serializedResult.prependLength()
         return serializedResult
+    }
+
+    func withCloudBoardJobHelperRequestSummary(
+        jobUUID: UUID,
+        body: () async throws -> Void
+    ) async {
+        var requestSummary = CloudBoardJobHelperRequestSummary(jobUUID: self.jobUUID)
+
+        do {
+            try await body()
+        } catch {
+            requestSummary.populate(error: error)
+        }
+        guard self.stateMachine.abandoned == false else {
+            return
+        }
+
+        requestSummary.remotePID = await self.workload.remotePID
+        self.requestPlaintextMetadata.map { requestSummary.populateRequestMetadata($0) }
+        requestSummary.startTimeNanos = self.requestParametersReceivedInstant
+        requestSummary.endTimeNanos = RequestSummaryClock.now
+        requestSummary.requestMessageCount = self.requestMessageCount.withLock { $0 }
+        requestSummary.responseMessageCount = self.responseMessageCount.withLock { $0 }
+        if requestSummary.requestMessageCount > 0 {
+            if requestSummary.responseMessageCount > 0 {
+                self.metrics.emit(Metrics.WorkloadManager.TotalResponsesSentCounter(action: .increment))
+                if let error = requestSummary.error {
+                    self.metrics.emit(Metrics.WorkloadManager.FailureResponsesSentCounter.Factory().make(error))
+                    // requestDuration should always be set here, but prefer not to crash for telemetry
+                    if let durationMicros = requestSummary.durationMicros {
+                        self.metrics.emit(
+                            Metrics.WorkloadManager.WorkloadDurationFromFirstRequestMessage(
+                                duration: .microseconds(durationMicros),
+                                error: error
+                            )
+                        )
+                    } else {
+                        await WorkloadJobManagerCheckpoint(
+                            logMetadata: self.logMetadata(),
+                            requestMessageCount: self.requestMessageCount.withLock { $0 },
+                            responseMessageCount: self.responseMessageCount.withLock { $0 },
+                            message: "Failed to report workload duration metric - duration was nil",
+                            error: error
+                        ).log(to: Self.logger, level: .error)
+                    }
+                } else {
+                    self.metrics.emit(Metrics.WorkloadManager.SuccessResponsesSentCounter(action: .increment))
+                    // requestDuration should always be set here, but prefer not to crash for telemetry
+                    if let durationMicros = requestSummary.durationMicros {
+                        self.metrics.emit(
+                            Metrics.WorkloadManager.WorkloadDurationFromFirstRequestMessage(
+                                duration: .microseconds(durationMicros),
+                                error: nil
+                            )
+                        )
+                    } else {
+                        await WorkloadJobManagerCheckpoint(
+                            logMetadata: self.logMetadata(),
+                            requestMessageCount: self.requestMessageCount.withLock { $0 },
+                            responseMessageCount: self.responseMessageCount.withLock { $0 },
+                            message: "Failed to report workload duration metric - duration was nil"
+                        ).log(to: Self.logger, level: .error)
+                    }
+                }
+            } else { // no response sent, but an error recorded
+                if let error = requestSummary.error {
+                    self.metrics.emit(Metrics.WorkloadManager.OverallErrorCounter.Factory().make(error))
+                } else {
+                    let error = WorkloadJobManagerNoResponseSentError()
+                    requestSummary.populate(error: error)
+                    self.metrics.emit(Metrics.WorkloadManager.OverallErrorCounter.Factory().make(error))
+                }
+            }
+        } else {
+            self.metrics.emit(Metrics.WorkloadManager.UnusedTerminationCounter(action: .increment))
+        }
+        requestSummary.log(to: Self.logger)
     }
 }
 
@@ -445,6 +476,7 @@ struct LengthPrefixBuffer {
                 }
                 self.buffer = self.buffer.dropFirst(4)
                 self.state = .waitingForData(length)
+
             case .waitingForData(let length):
                 guard self.buffer.count >= length else {
                     if chunkFragment.isFinal {
@@ -492,7 +524,8 @@ struct WorkloadJobStateMachine {
         case awaitingOneTimeToken([BufferedMessage<Data>])
         case awaitingTokenGrantingToken([BufferedMessage<Data>], oneTimeToken: Data)
         case validatedTokenGrantingToken
-        case terminated
+        case abandoning
+        case terminated(Bool)
     }
 
     private let tgtValidator: TokenGrantingTokenValidator
@@ -502,6 +535,17 @@ struct WorkloadJobStateMachine {
 
     private var requestID: String = ""
     private let jobUUID: UUID
+
+    public var abandoned: Bool {
+        switch self.state {
+        case .abandoning:
+            return true
+        case .terminated(let abandoned):
+            return abandoned
+        default:
+            return false
+        }
+    }
 
     init(
         tgtValidator: TokenGrantingTokenValidator,
@@ -533,6 +577,8 @@ struct WorkloadJobStateMachine {
                 return (nil, self.state)
             case .validatedTokenGrantingToken:
                 return (chunk, self.state)
+            case .abandoning:
+                preconditionFailure("Received chunk after instance abandoned")
             case .terminated:
                 preconditionFailure("Received chunk while already terminated")
             }
@@ -551,6 +597,8 @@ struct WorkloadJobStateMachine {
                 return ((), self.state)
             case .awaitingTokenGrantingToken, .validatedTokenGrantingToken:
                 throw TokenGrantingTokenError.receivedOneTimeTokenTwice
+            case .abandoning:
+                preconditionFailure("Received OTT after instance abandoned")
             case .terminated:
                 preconditionFailure("Received one-time token while already terminated")
             }
@@ -576,6 +624,8 @@ struct WorkloadJobStateMachine {
                 return (bufferedMessages, self.state)
             case .validatedTokenGrantingToken:
                 throw TokenGrantingTokenError.receivedTokenGrantingTokenTwice
+            case .abandoning:
+                preconditionFailure("Received TGT after instance abandoned")
             case .terminated:
                 preconditionFailure("Received token granting token while already terminated")
             }
@@ -583,7 +633,7 @@ struct WorkloadJobStateMachine {
     }
 
     mutating func receiveAuthToken(
-        _ authToken: Com_Apple_Privatecloudcompute_Api_V1_AuthToken
+        _ authToken: Proto_PrivateCloudCompute_AuthToken
     ) throws -> [BufferedMessage<Data>] {
         try WorkloadJobStateMachineCheckpoint(
             logMetadata: self.logMetadata(),
@@ -600,9 +650,27 @@ struct WorkloadJobStateMachine {
                 return (bufferedMessages, self.state)
             case .validatedTokenGrantingToken:
                 throw TokenGrantingTokenError.receivedTokenGrantingTokenTwice
+            case .abandoning:
+                preconditionFailure("Received auth token after instance abandoned")
             case .terminated:
                 preconditionFailure("Received auth token while already terminated")
             }
+        }
+    }
+
+    mutating func abandon() {
+        WorkloadJobStateMachineCheckpoint(
+            logMetadata: self.logMetadata(),
+            state: self.state,
+            operation: "abandon"
+        ).loggingStateChange(to: Self.logger, level: .debug) {
+            switch self.state {
+            case .terminated:
+                preconditionFailure("Attempted to abandon after termination")
+            default:
+                self.state = .abandoning
+            }
+            return ((), self.state)
         }
     }
 
@@ -612,6 +680,7 @@ struct WorkloadJobStateMachine {
             state: self.state,
             operation: "terminate"
         ).loggingStateChange(to: Self.logger, level: .debug) {
+            var isAbandoned = false
             switch self.state {
             case .awaitingOneTimeToken:
                 // Reached the end of the request stream without receiving the one-time token from ROPES
@@ -621,10 +690,12 @@ struct WorkloadJobStateMachine {
                 throw TokenGrantingTokenError.missingTokenGrantingToken
             case .validatedTokenGrantingToken:
                 () // Nothing to do
+            case .abandoning:
+                isAbandoned = true
             case .terminated:
                 preconditionFailure("Attempted to terminate more than once")
             }
-            self.state = .terminated
+            self.state = .terminated(isAbandoned)
             return ((), self.state)
         }
     }
@@ -698,11 +769,11 @@ enum TokenGrantingTokenError: Error {
 }
 
 protocol ResponseStatusConvertible: Error {
-    var responseStatus: Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeResponse.ResponseStatus { get }
+    var responseStatus: Proto_PrivateCloudCompute_PrivateCloudComputeResponse.ResponseStatus { get }
 }
 
 extension Error {
-    var responseStatus: Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeResponse.ResponseStatus {
+    var responseStatus: Proto_PrivateCloudCompute_PrivateCloudComputeResponse.ResponseStatus {
         switch self {
         case let convertibleError as ResponseStatusConvertible:
             return convertibleError.responseStatus
@@ -713,7 +784,7 @@ extension Error {
 }
 
 extension TokenGrantingTokenError: ResponseStatusConvertible {
-    var responseStatus: Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeResponse.ResponseStatus {
+    var responseStatus: Proto_PrivateCloudCompute_PrivateCloudComputeResponse.ResponseStatus {
         switch self {
         case .missingTokenGrantingToken, .missingOneTimeToken:
             return .unauthenticated
@@ -724,7 +795,7 @@ extension TokenGrantingTokenError: ResponseStatusConvertible {
 }
 
 extension TokenGrantingTokenValidationError: ResponseStatusConvertible {
-    var responseStatus: Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeResponse.ResponseStatus {
+    var responseStatus: Proto_PrivateCloudCompute_PrivateCloudComputeResponse.ResponseStatus {
         return .unauthenticated
     }
 }
@@ -732,10 +803,11 @@ extension TokenGrantingTokenValidationError: ResponseStatusConvertible {
 struct WorkloadJobManagerNoResponseSentError: Error {}
 
 extension WorkloadJobManager {
-    private func logMetadata() -> CloudBoardJobHelperLogMetadata {
-        return CloudBoardJobHelperLogMetadata(
+    private func logMetadata() async -> CloudBoardJobHelperLogMetadata {
+        return await CloudBoardJobHelperLogMetadata(
             jobID: self.jobUUID,
-            requestTrackingID: self.requestPlaintextMetadata?.requestID
+            requestTrackingID: self.requestPlaintextMetadata?.requestID,
+            remotePID: self.workload.remotePID
         )
     }
 }

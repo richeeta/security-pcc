@@ -115,7 +115,7 @@ extension AttestationSet.Attestation {
     }
 }
 
-public protocol CloudBoardAttestationAPIClientToServerProtocol: AnyActor, Sendable {
+public protocol CloudBoardAttestationAPIClientToServerProtocol: Actor {
     func requestAttestedKeySet() async throws -> AttestedKeySet
     func requestAttestationSet() async throws -> AttestationSet
 }

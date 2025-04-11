@@ -14,37 +14,107 @@
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
-import CloudMetricsHealthFramework
-import os
+internal import CloudMetricsConstants
+package import CloudMetricsHealthFramework
+internal import CloudMetricsUtils
+internal import os
 
-public actor CloudMetricsHealthServer {
-    private var healthState: CloudMetricsHealthState = .unknown
-    
+package final class CloudMetricsHealthServer: Sendable {
+
+    private enum State {
+        case stopped
+        case running(CloudMetricsUtils.Promise<Void, Error>)
+    }
+
+    /// State of the thing being monitored
+    private let healthState: OSAllocatedUnfairLock<CloudMetricsHealthState> = .init(initialState: .unknown)
+    /// State of the health server itself
+    private let state: OSAllocatedUnfairLock<State> = .init(uncheckedState: .stopped)
+
     static let logger: Logger = Logger(
         subsystem: kCloudMetricsLoggingSubsystem,
         category: "HealthServer"
     )
     
-    let server: CloudMetricsHealthXPCServer
-    
-    public init() {
-        server = CloudMetricsHealthXPCServer.localListener()
+    let server: CloudMetricsHealthXPCServer = CloudMetricsHealthXPCServer.localListener()
+    private let healthStream: AsyncStream<CloudMetricsHealthState>
+
+    package init(healthStream: AsyncStream<CloudMetricsHealthState>) {
+        self.healthStream = healthStream
     }
     
-    public func run() async {
-        Self.logger.info("Starting health server")
-        await server.listen(serverDelegate: self)
-        return await withUnsafeContinuation { _ in }
+    package func run() async throws {
+        let promise: CloudMetricsUtils.Promise? = self.state.withLock { state in
+            switch state {
+            case .stopped:
+                let promise = CloudMetricsUtils.Promise<Void, Error>()
+                state = .running(promise)
+                return promise
+            case .running:
+                return nil
+            }
+        }
+        guard let promise else {
+            Self.logger.warning("Health server already running")
+            return
+        }
+        defer {
+            self.state.withLock { state in
+                state = .stopped
+            }
+            Self.logger.log("Health server stopped")
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+
+            group.addTask {
+                Self.logger.log("Health server start listening")
+                await self.server.listen(serverDelegate: self)
+                _ = try await withTaskCancellationHandler(operation: {
+                    try await Future(promise).valueWithCancellation
+                }, onCancel: {
+                    promise.succeed(with: ())
+                })
+            }
+            group.addTask {
+                for await health in self.healthStream {
+                    self.updateHealthState(to: health)
+                }
+            }
+            defer {
+                group.cancelAll()
+            }
+            try await group.next()
+        }
     }
-    
-    public func updateHealthState(to state: CloudMetricsHealthState) {
-        Self.logger.info("Updating health status: \(self.healthState) -> \(state)")
-        self.healthState = state
+
+    package func shutdown() {
+        Self.logger.log("Shutting down health server")
+        self.state.withLock { state in
+            switch state {
+            case .stopped:
+                Self.logger.error("Unexpected state to shutdown health server")
+            case .running(let promise):
+                promise.succeed()
+            }
+        }
+    }
+
+    package func updateHealthState(to state: CloudMetricsHealthState) {
+        self.healthState.withLock { healthState in
+            if healthState == state {
+                // No state change
+                return
+            }
+            let healthCopy = healthState
+            Self.logger.log("Updating health status: \(healthCopy, privacy: .public) -> \(state, privacy: .public)")
+            healthState = state
+        }
     }
 }
 
 extension CloudMetricsHealthServer: CloudMetricsHealthXPCServerDelegateProtocol {
-    public func getHealthState() async throws -> CloudMetricsHealthFramework.CloudMetricsHealthState {
-        return self.healthState
+    package func getHealthState() -> CloudMetricsHealthFramework.CloudMetricsHealthState {
+        self.healthState.withLock { $0 }
     }
 }

@@ -28,16 +28,18 @@ package enum NodeReceivingSource: String, Codable, CaseIterable {
     case request = "request"
 }
 
-final actor NodeDistributionAnalyzer: Sendable {
-
+final actor NodeDistributionAnalyzer<
+    SystemInfo: SystemInfoProtocol
+>: Sendable {
     private let jsonEncoder = JSONEncoder()
 
     /// number of percentage buckets, should always be larger than 0
-    static let bucketCount = 10
+    private let bucketCount = 10
 
     private let environment: String
+    private let systemInfo: SystemInfo
 
-    let logger = tc2Logger(forCategory: .MetricReporter)
+    let logger = tc2Logger(forCategory: .metricReporter)
 
     /// store helper
     private let storeHelper: NodeDistributionAnalyzerStoreHelper
@@ -59,9 +61,10 @@ final actor NodeDistributionAnalyzer: Sendable {
         }
     }
 
-    init(environment: String, storeURL: URL) {
+    init(environment: String, storeURL: URL, systemInfo: SystemInfo) {
         self.environment = environment
         self.storeHelper = .init(storeURL: storeURL)
+        self.systemInfo = systemInfo
     }
 
     /// receiving new node
@@ -151,18 +154,18 @@ final actor NodeDistributionAnalyzer: Sendable {
         if nodeDistribution.totalCount > 0 && nodeDistribution.batchCount > 0 {
             logger.log("Generating node distribution reports for \(forSource.rawValue) with \(nodeDistribution.batchCount) batches and \(nodeDistribution.totalCount) total nodes")
             // construct histogram
-            var histogram: [Int] = Array(repeating: 0, count: Self.bucketCount)
+            var histogram: [Int] = Array(repeating: 0, count: self.bucketCount)
             for (_, count) in nodeDistribution.distributionByNodeID {
                 // calculate which bucket this node belongs to
                 // get the percentage
                 let percentage: Double = Double(count) / Double(nodeDistribution.batchCount)
                 // percentage increment per bucket, if the bucket size is 10, increment will be 0.10 (10%)
-                let increment: Double = 1.0 / Double(Self.bucketCount)
+                let increment: Double = 1.0 / Double(self.bucketCount)
                 // calculate the index
                 var index: Int = Int(percentage / increment)
-                if index >= Self.bucketCount {
+                if index >= self.bucketCount {
                     // hitting >= 100%
-                    index = Self.bucketCount - 1
+                    index = self.bucketCount - 1
                 }
                 histogram[index] += 1
             }
@@ -171,7 +174,7 @@ final actor NodeDistributionAnalyzer: Sendable {
             var report = TC2AttestationDistributionMetric()
             report.fields[.environment] = .string(self.environment)
             report.fields[.eventTime] = .int(Int64(Date().timeIntervalSince1970))
-            report.fields[.clientInfo] = .string(tc2OSInfoWithDeviceModel)
+            report.fields[.clientInfo] = .string(self.systemInfo.osInfoWithDeviceModel)
             report.fields[.locale] = .string(Locale.current.identifier)
 
             report.fields[.attestationSource] = .string(forSource.rawValue)

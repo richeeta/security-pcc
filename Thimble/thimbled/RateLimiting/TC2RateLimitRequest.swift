@@ -28,13 +28,16 @@ import os.lock
 
 final class TC2RateLimitRequest<
     ConnectionFactory: NWAsyncConnectionFactoryProtocol,
-    RateLimiter: RateLimiterProtocol
+    RateLimiter: RateLimiterProtocol,
+    SystemInfo: SystemInfoProtocol
 >: Sendable {
-    private let logger = tc2Logger(forCategory: .RateLimitRequest)
+    private let logger = tc2Logger(forCategory: .rateLimitRequest)
+    private let logPrefix: String
     private let connectionFactory: ConnectionFactory
     private let rateLimiter: RateLimiter
     private let requestID: UUID
     private let config: TC2Configuration
+    private let systemInfo: SystemInfo
     private let bundleIdentifier: String?
     private let featureIdentifier: String?
 
@@ -43,26 +46,35 @@ final class TC2RateLimitRequest<
         rateLimiter: RateLimiter,
         requestID: UUID,
         config: TC2Configuration,
+        systemInfo: SystemInfo,
         bundleIdentifier: String?,
         featureIdentifier: String?
     ) {
+        self.logPrefix = "\(requestID):"
         self.connectionFactory = connectionFactory
         self.rateLimiter = rateLimiter
         self.requestID = requestID
         self.config = config
+        self.systemInfo = systemInfo
         self.bundleIdentifier = bundleIdentifier
         self.featureIdentifier = featureIdentifier
     }
 
     func sendRequest() async throws {
-        self.logger.info("\(self.requestID) executing ratelimit request")
+        self.logger.log("\(self.logPrefix) executing ratelimit request")
         defer {
-            self.logger.info("\(self.requestID) finished ratelimit request")
+            self.logger.log("\(self.logPrefix) finished ratelimit request")
         }
+        let environment = self.config.environment(systemInfo: self.systemInfo)
 
         try await self.connectionFactory.connect(
-            parameters: .makeTLSAndHTTPParameters(ignoreCertificateErrors: self.config[.ignoreCertificateErrors], forceOHTTP: self.config.environment.forceOHTTP, bundleIdentifier: self.bundleIdentifier),
-            endpoint: .url(self.config.environment.ropesUrl),
+            parameters: .makeTLSAndHTTPParameters(
+                ignoreCertificateErrors: self.config[.ignoreCertificateErrors],
+                forceOHTTP: environment.forceOHTTP,
+                useCompression: false,
+                bundleIdentifier: self.bundleIdentifier
+            ),
+            endpoint: .url(environment.ropesUrl),
             activity: NWActivity(domain: .cloudCompute, label: .rateLimit),
             on: .main,
             requestID: self.requestID
@@ -76,41 +88,48 @@ final class TC2RateLimitRequest<
                 }
             }
             let rateLimitRequestData = try rateLimitRequest.serializedData()
+
+            var headers = HTTPFields([
+                .init(name: .appleRequestUUID, value: self.requestID.uuidString),
+                .init(name: .appleClientInfo, value: self.systemInfo.osInfo),
+                .init(name: .contentType, value: HTTPField.Constants.contentTypeApplicationXProtobuf),
+                .init(name: .userAgent, value: HTTPField.Constants.userAgentTrustedCloudComputeD),
+            ])
+
+            if let automatedDeviceGroup = self.systemInfo.automatedDeviceGroup {
+                headers[.appleAutomatedDeviceGroup] = automatedDeviceGroup
+            }
+
             let httpRequest = HTTPRequest(
                 method: .post,
                 scheme: "https",
-                authority: self.config.environment.ropesHostname,
+                authority: environment.ropesHostname,
                 path: self.config[.rateLimitRequestPath],
-                headerFields: .init([
-                    .init(name: .appleRequestUUID, value: self.requestID.uuidString),
-                    .init(name: .appleClientInfo, value: tc2OSInfo),
-                    .init(name: .contentType, value: HTTPField.Constants.contentTypeApplicationXProtobuf),
-                    .init(name: .userAgent, value: HTTPField.Constants.userAgentTrustedCloudComputeD),
-                ])
+                headerFields: headers
             )
 
-            self.logger.info("\(self.requestID) sending request \(httpRequest.debugDescription)")
+            self.logger.info("\(self.logPrefix) sending request \(String(reflecting: httpRequest))")
             try await outbound.write(
                 content: rateLimitRequestData,
                 contentContext: .init(request: httpRequest),
                 isComplete: true
             )
 
-            self.logger.info("\(self.requestID) waiting for response")
+            self.logger.info("\(self.logPrefix) waiting for response")
             for try await response in inbound {
-                self.logger.info("\(self.requestID) received response \(response.data?.count ?? -1)")
+                self.logger.info("\(self.logPrefix) received response \(response.data?.count ?? -1)")
                 if let data = response.data {
                     let now = Date.now
                     let rateLimitResponse = try Proto_Ropes_HttpService_ConfigResponse(serializedBytes: data)
                     let rateLimitCount = rateLimitResponse.rateLimitConfigurationList.rateLimitConfiguration.count
-                    self.logger.info("\(self.requestID) decoded ratelimit response configuration count \(rateLimitCount)")
+                    self.logger.info("\(self.logPrefix) decoded ratelimit response configuration count \(rateLimitCount)")
 
                     if rateLimitCount > 0 {
                         for proto in rateLimitResponse.rateLimitConfigurationList.rateLimitConfiguration {
                             if let rateLimitConfig = RateLimitConfiguration(now: now, proto: proto, config: self.config) {
                                 await self.rateLimiter.limitByConfiguration(rateLimitConfig)
                             } else {
-                                self.logger.error("\(self.requestID) unable to process rate limit configuration \(String(describing: proto))")
+                                self.logger.error("\(self.logPrefix) unable to process rate limit configuration \(String(describing: proto))")
                             }
                         }
                         await self.rateLimiter.trimExpiredData(now: now)
@@ -118,7 +137,7 @@ final class TC2RateLimitRequest<
                     }
                 }
                 if response.isComplete {
-                    self.logger.info("\(self.requestID) response completed")
+                    self.logger.info("\(self.logPrefix) response completed")
                     break
                 }
             }

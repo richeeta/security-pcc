@@ -27,7 +27,7 @@ internal enum Slot: Codable, CustomStringConvertible {
 	case index(Int)
 
 	var description: String {
-		switch(self) {
+		switch self {
 		case .notInitialized:
 			return "-1 (Not Initialized)"
 		case .initFailed(let msg):
@@ -68,9 +68,11 @@ internal class Util {
 		}
 
 		let iterator = IOKitManagedHandle()
-		let handler = IOServiceGetMatchingServices(kIOMainPortDefault,
-												   matchingDict,
-												   &iterator.handle)
+		let handler = IOServiceGetMatchingServices(
+			kIOMainPortDefault,
+			matchingDict,
+			&iterator.handle
+		)
 		guard handler == kIOReturnSuccess else {
 			return .initFailed("Could not find AppleOceanComputeMCU")
 		}
@@ -80,10 +82,12 @@ internal class Util {
 			return .initFailed("Could not find AppleOceanComputeMCU")
 		}
 
-		guard let data = IORegistryEntryCreateCFProperty(service.handle,
-														 "Carrier Slot" as CFString,
-														 kCFAllocatorDefault,
-														 0)
+		guard let data = IORegistryEntryCreateCFProperty(
+			service.handle,
+			"Carrier Slot" as CFString,
+			kCFAllocatorDefault,
+			0
+		)
 		else {
 			return .initFailed("Could not find AppleOceanComputeMCU::Carrier Slot")
 		}
@@ -95,7 +99,10 @@ internal class Util {
 		return .index(slot.intValue)
 	}
 
-	internal static func ensembleDebugMap(ensembleConfig: EnsembleConfiguration, slots: [Slot]) -> String {
+	internal static func ensembleDebugMap(
+		ensembleConfig: EnsembleConfiguration,
+		slots: [Slot]
+	) -> String {
 		Util.ensembleDebugMapCalls += 1
 
 		var debugStr =
@@ -115,19 +122,21 @@ internal class Util {
 				},
 			"""
 
-		for rank in 0..<slots.count {
+		for rank in 0 ..< slots.count {
 			var chassisID = "?"
 			var hostName = "?"
-			if let nodeConfig = ensembleConfig.nodes.first(where: {$0.value.rank == rank}) {
+			if let nodeConfig = ensembleConfig.nodes.first(where: { $0.value.rank == rank }) {
 				chassisID = nodeConfig.value.chassisID
 				hostName = nodeConfig.value.hostName ?? "nil"
 			}
-			debugStr = String(format: nodeInfoFormat,
-							  debugStr,
-							  rank,
-							  chassisID,
-							  "\(slots[rank])",
-							  hostName)
+			debugStr = String(
+				format: nodeInfoFormat,
+				debugStr,
+				rank,
+				chassisID,
+				"\(slots[rank])",
+				hostName
+			)
 		}
 
 		debugStr =

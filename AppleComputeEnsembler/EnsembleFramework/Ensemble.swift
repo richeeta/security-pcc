@@ -21,12 +21,10 @@
 
 import CryptoKit
 import Foundation
-import OSLog
-import XPC
 import Network
+import OSLog
 import Security
-
-
+import XPC
 
 @_implementationOnly import MobileGestaltPrivate // For fetching UDID
 
@@ -39,10 +37,12 @@ import Security
 public let kEnsemblerServiceName = "com.apple.cloudos.AppleComputeEnsembler.service"
 
 @available(macOS 15.0, iOS 18.0, *)
-public let kEnsembleStatusReadyEventName = "com.apple.cloudos.AppleComputeEnsembler.Notification.ready"
+public let kEnsembleStatusReadyEventName =
+	"com.apple.cloudos.AppleComputeEnsembler.Notification.ready"
 
 @available(macOS 15.0, iOS 18.0, *)
-public let kEnsembleStatusFailedEventName = "com.apple.cloudos.AppleComputeEnsembler.Notification.failed"
+public let kEnsembleStatusFailedEventName =
+	"com.apple.cloudos.AppleComputeEnsembler.Notification.failed"
 
 // MARK: - Errors
 
@@ -93,17 +93,18 @@ public enum EnsemblerStatus: Codable, CaseIterable, CustomStringConvertible {
 	case pairing
 	/// The node has completed pairing
 	case pairingComplete
-    ///  Pairing due to key being rotated
-    case keyRotationPairing
-    ///  Attesting due to key being rotated
-    case keyRotationAttesting
+	///  Pairing due to key being rotated
+	case keyRotationPairing
+	///  Attesting due to key being rotated
+	case keyRotationAttesting
 	/// The node has got the key and the key is validated by leader.
 	case keyAccepted
 	/// Ensemble in failed state; currently unrecoverable
 	case failed
 	/// An activation check failed before we even tried to activate the backend
 	case failedActivationChecks
-	/// Ensemble failed during a drain event. Almost certainly, a neighbor rebooted and we're about to reboot too!
+	/// Ensemble failed during a drain event. Almost certainly, a neighbor rebooted and we're about to
+	/// reboot too!
 	case failedWhileDraining
 	/// All nodes checked in (state derived from leader), but not yet got the shared key.
 	case attesting
@@ -131,10 +132,10 @@ public enum EnsemblerStatus: Codable, CaseIterable, CustomStringConvertible {
 			return "pairing"
 		case .pairingComplete:
 			return "pairingComplete"
-        case .keyRotationPairing:
-            return "keyRotationPairing"
-        case .keyRotationAttesting:
-            return "keyRotationAttesting"
+		case .keyRotationPairing:
+			return "keyRotationPairing"
+		case .keyRotationAttesting:
+			return "keyRotationAttesting"
 		case .keyAccepted:
 			return "keyAccepted"
 		case .failed:
@@ -277,10 +278,10 @@ public struct EnsemblerResponse: Codable {
 	/// decrypted text
 	public var decrypted: Data?
 	/// max buffers per key
-    public var maxBuffersPerKey: UInt64?
-    /// max seconds per key
+	public var maxBuffersPerKey: UInt64?
+	/// max seconds per key
 	public var maxSecsPerKey: UInt64?
-    /// ensemble ID
+	/// ensemble ID
 	public var ensembleID: String?
 	/// authentication code
 	public var authCode: Data?
@@ -295,7 +296,7 @@ public struct EnsemblerResponse: Codable {
 		decrypted: Data? = nil,
 		health: EnsembleHealth? = nil,
 		cableDiagnostics: [String]? = nil,
-        maxSecsPerKey: UInt64? = nil,
+		maxSecsPerKey: UInt64? = nil,
 		maxBuffersPerKey: UInt64? = nil,
 		ensembleID: String? = nil,
 		authCode: Data? = nil
@@ -537,40 +538,42 @@ public class EnsemblerSession {
 		return try self.grabSelf(response: response)
 	}
 
-    
-    /// Blocking call to get NWProtocolTLS.Options
-    /// - Returns: `NWProtocolTLS.Options`- An object that contains security options to use for TLS handshakes.
-    public func getTlsOptions() throws -> NWProtocolTLS.Options {
-        EnsemblerSession.logger.debug("Requesting sec options")
-        //we need authStr string to get authcode back from ensembled ( using the shared key),
-        // Because we rely on this on all the nodes, we need to have hardcoded string. ( unless, we come up with other protocol to distributed this string).
-        // The authcode we get will be eventually used to get the NWProtocolTLS.Options
-        let authStr = "ensembled"
-        guard let data = authStr.data(using: .utf8) else {
-            throw EnsembleError.commandFailure(
-                error: "Error converting to Data"
-            )
-        }
-        let authCode = try getAuthCode(data: data)
-        let options = try getTlsOptions(authStr: authStr, authCode: authCode )
-        return options
-    }
+	/// Blocking call to get NWProtocolTLS.Options
+	/// - Returns: `NWProtocolTLS.Options`- An object that contains security options to use for TLS
+	/// handshakes.
+	public func getTlsOptions() throws -> NWProtocolTLS.Options {
+		EnsemblerSession.logger.debug("Requesting sec options")
+		// we need authStr string to get authcode back from ensembled ( using the shared key),
+		// Because we rely on this on all the nodes, we need to have hardcoded string. ( unless, we come
+		// up with other protocol to distributed this string).
+		// The authcode we get will be eventually used to get the NWProtocolTLS.Options
+		let authStr = "ensembled"
+		guard let data = authStr.data(using: .utf8) else {
+			throw EnsembleError.commandFailure(
+				error: "Error converting to Data"
+			)
+		}
+		let authCode = try getAuthCode(data: data)
+		let options = try getTlsOptions(authStr: authStr, authCode: authCode)
+		return options
+	}
 
-    /// Async-Friendly(TM) call to get NWProtocolTLS.Options
-    /// - Returns: `NWProtocolTLS.Options`- An object that contains security options to use for TLS handshakes.
-    public func getTlsOptions() async throws -> NWProtocolTLS.Options {
-        EnsemblerSession.logger.debug("Requesting sec options")
-        let authStr = "ensembled"
-        guard let data = authStr.data(using: .utf8) else {
-            throw EnsembleError.commandFailure(
-                error: "Error converting to Data"
-            )
-        }
-        let authCode = try  await getAuthCode(data: data)
-        let options = try getTlsOptions(authStr: authStr, authCode: authCode )
-        return options
-    }
-    
+	/// Async-Friendly(TM) call to get NWProtocolTLS.Options
+	/// - Returns: `NWProtocolTLS.Options`- An object that contains security options to use for TLS
+	/// handshakes.
+	public func getTlsOptions() async throws -> NWProtocolTLS.Options {
+		EnsemblerSession.logger.debug("Requesting sec options")
+		let authStr = "ensembled"
+		guard let data = authStr.data(using: .utf8) else {
+			throw EnsembleError.commandFailure(
+				error: "Error converting to Data"
+			)
+		}
+		let authCode = try await getAuthCode(data: data)
+		let options = try getTlsOptions(authStr: authStr, authCode: authCode)
+		return options
+	}
+
 	/// Blocking call to receive a list of peers in the ensemble (not including self)
 	/// - Returns: List of peers if any exist or `nil`
 	/// - Note: We assume that no peers is a legal state so no error is thrown
@@ -609,15 +612,15 @@ public class EnsemblerSession {
 
 	/// Blocking call to receive maxBuffersPerKey
 	/// - Returns: `maxBuffersPerKey
-    public func getMaxBuffersPerKey() throws -> UInt64 {
+	public func getMaxBuffersPerKey() throws -> UInt64 {
 		EnsemblerSession.logger.debug("Getting max buffers per key")
 		let response = try sendCommandSync(command: .getMaxBuffersPerKey)
-        guard let maxBuffersPerKey = response.maxBuffersPerKey else {
-            throw EnsembleError.commandFailure(
-                error: "Error getting max buffers per key."
-            )
-        }
-        return maxBuffersPerKey
+		guard let maxBuffersPerKey = response.maxBuffersPerKey else {
+			throw EnsembleError.commandFailure(
+				error: "Error getting max buffers per key."
+			)
+		}
+		return maxBuffersPerKey
 	}
 
 	/// Async-Friendly(TM) call to receive maxBuffersPerKey
@@ -625,12 +628,12 @@ public class EnsemblerSession {
 	public func getMaxBuffersPerKey() async throws -> UInt64 {
 		EnsemblerSession.logger.debug("Getting max buffers per key asynchronously")
 		let response = try await sendCommandAsync(command: .getMaxBuffersPerKey)
-        guard let maxBuffersPerKey = response.maxBuffersPerKey else {
-            throw EnsembleError.commandFailure(
-                error: "Error getting max buffers per key."
-            )
-        }
-        return maxBuffersPerKey
+		guard let maxBuffersPerKey = response.maxBuffersPerKey else {
+			throw EnsembleError.commandFailure(
+				error: "Error getting max buffers per key."
+			)
+		}
+		return maxBuffersPerKey
 	}
 
 	/// Blocking call to receive maxSecsPerKey
@@ -638,12 +641,12 @@ public class EnsemblerSession {
 	public func getMaxSecsPerKey() throws -> UInt64 {
 		EnsemblerSession.logger.debug("Getting max seconds per key")
 		let response = try sendCommandSync(command: .getMaxSecsPerKey)
-        guard let maxSecsPerKey = response.maxSecsPerKey else {
-            throw EnsembleError.commandFailure(
-                error: "Error getting max seconds per key."
-            )
-        }
-        return maxSecsPerKey
+		guard let maxSecsPerKey = response.maxSecsPerKey else {
+			throw EnsembleError.commandFailure(
+				error: "Error getting max seconds per key."
+			)
+		}
+		return maxSecsPerKey
 	}
 
 	/// Async-Friendly(TM) call to receive maxSecsPerKey
@@ -651,12 +654,12 @@ public class EnsemblerSession {
 	public func getMaxSecsPerKey() async throws -> UInt64 {
 		EnsemblerSession.logger.debug("Getting max seconds per key asynchronously")
 		let response = try await sendCommandAsync(command: .getMaxSecsPerKey)
-        guard let maxSecsPerKey = response.maxSecsPerKey else {
-            throw EnsembleError.commandFailure(
-                error: "Error getting max seconds per key."
-            )
-        }
-        return maxSecsPerKey
+		guard let maxSecsPerKey = response.maxSecsPerKey else {
+			throw EnsembleError.commandFailure(
+				error: "Error getting max seconds per key."
+			)
+		}
+		return maxSecsPerKey
 	}
 
 	/// Blocking call boolean check if the current node is the ensemble leader
@@ -683,8 +686,10 @@ public class EnsemblerSession {
 		let response = try sendCommandSync(command: EnsemblerRequest.getHealth)
 		try self.validateResponse(response: response)
 		guard let health = response.health else {
-			return EnsembleHealth(healthState: HealthState.initializing,
-								  internalState: EnsemblerStatus.uninitialized)
+			return EnsembleHealth(
+				healthState: HealthState.initializing,
+				internalState: EnsemblerStatus.uninitialized
+			)
 		}
 		return health
 	}
@@ -695,8 +700,10 @@ public class EnsemblerSession {
 		let response = try await sendCommandAsync(command: EnsemblerRequest.getHealth)
 		try self.validateResponse(response: response)
 		guard let health = response.health else {
-			return EnsembleHealth(healthState: HealthState.initializing,
-								  internalState: EnsemblerStatus.uninitialized)
+			return EnsembleHealth(
+				healthState: HealthState.initializing,
+				internalState: EnsemblerStatus.uninitialized
+			)
 		}
 		return health
 	}
@@ -727,32 +734,32 @@ public class EnsemblerSession {
 		return diags
 	}
 
-    /// Blocking call to get authentication code
-    private func getAuthCode(data: Data) throws -> Data {
-        EnsemblerSession.logger.info("Getting authentication code")
-        let response = try sendCommandSync(command: EnsemblerRequest.getAuthCode(data))
-        try self.validateResponse(response: response)
-        guard let authCode = response.authCode else {
-            throw EnsembleError.commandFailure(
-                error: "No authcode returned."
-            )
-        }
-        return authCode
-    }
+	/// Blocking call to get authentication code
+	private func getAuthCode(data: Data) throws -> Data {
+		EnsemblerSession.logger.info("Getting authentication code")
+		let response = try sendCommandSync(command: EnsemblerRequest.getAuthCode(data))
+		try self.validateResponse(response: response)
+		guard let authCode = response.authCode else {
+			throw EnsembleError.commandFailure(
+				error: "No authcode returned."
+			)
+		}
+		return authCode
+	}
 
-    /// Async-Friendly(TM) call to get authentication code
-    private func getAuthCode(data: Data) async throws -> Data {
-        EnsemblerSession.logger.info("Getting authentication code async")
-        let response = try await sendCommandAsync(command: EnsemblerRequest.getAuthCode(data))
-        try self.validateResponse(response: response)
-        guard let authCode = response.authCode else {
-            throw EnsembleError.commandFailure(
-                error: "No authcode returned."
-            )
-        }
-        return authCode
-    }
-    
+	/// Async-Friendly(TM) call to get authentication code
+	private func getAuthCode(data: Data) async throws -> Data {
+		EnsemblerSession.logger.info("Getting authentication code async")
+		let response = try await sendCommandAsync(command: EnsemblerRequest.getAuthCode(data))
+		try self.validateResponse(response: response)
+		guard let authCode = response.authCode else {
+			throw EnsembleError.commandFailure(
+				error: "No authcode returned."
+			)
+		}
+		return authCode
+	}
+
 	/// Blocking call to rotate shared key
 	public func rotateSharedKey() throws -> Bool {
 		EnsemblerSession.logger.debug("Rotating shared key ")
@@ -897,48 +904,53 @@ extension EnsemblerSession {
 
 		return try reply.decode(as: EnsemblerResponse.self)
 	}
-    
-    // create a utility function to encode strings as preshared key data.
-    private func stringToDispatchData(_ string: String) -> DispatchData? {
-        guard let stringData = string.data(using: .utf8) else {
-            return nil
-        }
-        let dispatchData = stringData.withUnsafeBytes {
-            DispatchData(bytes: $0)
-        }
-        return dispatchData
-    }
-    
-    private func getTlsOptions(authStr: String, authCode: Data) throws -> NWProtocolTLS.Options {
-        let tlsOptions = NWProtocolTLS.Options()
 
-        let authenticationData = authCode.withUnsafeBytes {
-            DispatchData(bytes: $0)
-        }
+	// create a utility function to encode strings as preshared key data.
+	private func stringToDispatchData(_ string: String) -> DispatchData? {
+		guard let stringData = string.data(using: .utf8) else {
+			return nil
+		}
+		let dispatchData = stringData.withUnsafeBytes {
+			DispatchData(bytes: $0)
+		}
+		return dispatchData
+	}
 
-        guard let data = stringToDispatchData(authStr) else {
-            throw EnsembleError.commandFailure(
-                error: "Error converting to dispatch data."
-            )
-        }
-        sec_protocol_options_add_pre_shared_key(tlsOptions.securityProtocolOptions,
-                                                authenticationData as __DispatchData,
-                                                data as __DispatchData)
-        
-        // Replace this with actual value from security framework when it is available
-        // rdar://134442920
-        let TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256 : UInt16 = 0xCCAC
-        
-        EnsemblerSession.logger.log("Using TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256 cipher suite")
-        
-        guard let tlsCipher =  tls_ciphersuite_t(rawValue: TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256) else {
-            throw EnsembleError.commandFailure(
-                error: "Error creating tls ciphersuite."
-            )
-        }
-        
-        sec_protocol_options_append_tls_ciphersuite(tlsOptions.securityProtocolOptions,
-                                                    tlsCipher)
-        return tlsOptions
-    }
+	private func getTlsOptions(authStr: String, authCode: Data) throws -> NWProtocolTLS.Options {
+		let tlsOptions = NWProtocolTLS.Options()
+
+		let authenticationData = authCode.withUnsafeBytes {
+			DispatchData(bytes: $0)
+		}
+
+		guard let data = stringToDispatchData(authStr) else {
+			throw EnsembleError.commandFailure(
+				error: "Error converting to dispatch data."
+			)
+		}
+		sec_protocol_options_add_pre_shared_key(
+			tlsOptions.securityProtocolOptions,
+			authenticationData as __DispatchData,
+			data as __DispatchData
+		)
+
+		// Replace this with actual value from security framework when it is available
+		// rdar://134442920
+		let TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256: UInt16 = 0xCCAC
+
+		EnsemblerSession.logger.log("Using TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256 cipher suite")
+
+		guard let tlsCipher = tls_ciphersuite_t(rawValue: TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256)
+		else {
+			throw EnsembleError.commandFailure(
+				error: "Error creating tls ciphersuite."
+			)
+		}
+
+		sec_protocol_options_append_tls_ciphersuite(
+			tlsOptions.securityProtocolOptions,
+			tlsCipher
+		)
+		return tlsOptions
+	}
 }

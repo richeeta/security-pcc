@@ -14,23 +14,23 @@
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
-import MantaAsyncXPC
+internal import CloudMetricsAsyncXPC
 
-public protocol CloudMetricsHealthXPCServerDelegateProtocol: AnyActor, Sendable {
+package protocol CloudMetricsHealthXPCServerDelegateProtocol: AnyObject, Sendable {
     func getHealthState() async throws -> CloudMetricsHealthState
 }
 
 public actor CloudMetricsHealthXPCServer {
-    private let listener: MantaAsyncXPCListener
-    private weak var delegate: CloudMetricsHealthXPCServerDelegateProtocol?
+    private let listener: CloudMetricsAsyncXPCListener
+    private var delegate: CloudMetricsHealthXPCServerDelegateProtocol?
 
     internal init(
-        listener: MantaAsyncXPCListener
+        listener: CloudMetricsAsyncXPCListener
     ) {
         self.listener = listener
     }
 
-    internal func configureHandlers(_ handlers: inout MantaAsyncXPCConnection.MessageHandlerStore) {
+    internal func configureHandlers(_ handlers: inout CloudMetricsAsyncXPCConnection.MessageHandlerStore) {
         handlers.register(CloudMetricsHealthXPCMessage.GetHealthState.self) { message in
             guard let delegate = await self.delegate else {
                 preconditionFailure(
@@ -41,14 +41,14 @@ public actor CloudMetricsHealthXPCServer {
         }
     }
 
-    public func listen(serverDelegate: CloudMetricsHealthXPCServerDelegateProtocol) async {
+    package func listen(serverDelegate: CloudMetricsHealthXPCServerDelegateProtocol) async {
         self.delegate = serverDelegate
         await self.listener.listen(buildMessageHandlerStore: configureHandlers)
     }
 
-    public static func localListener() -> CloudMetricsHealthXPCServer {
+    package static func localListener() -> CloudMetricsHealthXPCServer {
         self.init(
-            listener: MantaAsyncXPCListener(
+            listener: CloudMetricsAsyncXPCListener(
                 localService: kCloudMetricsHealthXPCServiceName,
                 entitlement: kCloudMetricsHealthXPCLocalServiceEntitlement
             )

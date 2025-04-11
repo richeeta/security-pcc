@@ -16,7 +16,7 @@
 
 import CloudBoardAsyncXPC
 
-public protocol CloudBoardControllerAPIServerToClientProtocol: AnyActor, Sendable {
+public protocol CloudBoardControllerAPIServerToClientProtocol: Actor {
     func updateConfiguration(config: WorkloadConfig) async throws
     func shutdown() async throws
 }

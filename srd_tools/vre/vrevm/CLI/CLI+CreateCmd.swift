@@ -148,6 +148,7 @@ extension CLI {
 
             let nram = UInt64(nramGB) * 1024 * 1024 * 1024
             let storage = UInt64(storageGB) * 1024 * 1024 * 1024
+            let nvramArgs = nvramArgsMap(bootArgs: bootArgs, nvramArgs: nvramArgs)
 
             let romImages = VM.ROMImages(
                 avpbooter: romImage,
@@ -162,7 +163,7 @@ extension CLI {
                     networkConfig: VM.NetworkConfig(mode: networkMode,
                                                     macAddr: macAddr,
                                                     bridgeIf: bridgeIf),
-                    nvramArgs: nvramArgsMap(bootArgs: bootArgs, nvramArgs: nvramArgs),
+                    nvramArgs: nvramArgs,
                     romImages: romImages,
                     platformFusing: fusing
                 )
@@ -170,6 +171,7 @@ extension CLI {
                 throw CLIError("create VM \(vmName): \(error)")
             }
 
+            try vm.open()
             print("Created VM \(vm.name) (ecid: \(vm.ecidStr))")
 
             if let darwinInit {
@@ -196,6 +198,10 @@ extension CLI {
                     try await vm.restore(restoreOptions)
                 } catch {
                     throw CLIError("restore failed: \(error)")
+                }
+
+                if let nvramArgs {
+                    try vm.modify(nvramArgs: nvramArgs)
                 }
             }
         }

@@ -23,9 +23,9 @@ struct DInitCryptexConfig {
     var size: Int?
     var sha256: DInitSHA256Digest?
     var auth: DInitAuthorizationService?
-    var dawToken: String?
+    var dawToken: CredentialString?
     var wgUsername: String?
-    var wgToken: String?
+    var wgToken: CredentialString?
     var alternateCDNHost: String?
     var backgroundTrafficClass: Bool?
     var networkRetryCount: UInt?

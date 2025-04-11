@@ -90,18 +90,27 @@ struct DInitConfig {
 }
 
 extension DInitConfig {
-    func jsonString(prettyPrinted: Bool = true) throws -> String {
+    func jsonString(prettyPrinted: Bool = true, redactCredentialStrings: Bool) throws -> String {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             if prettyPrinted {
                 encoder.outputFormatting.insert(.prettyPrinted)
             }
+            if !redactCredentialStrings {
+                encoder.userInfo[CredentialString.redactionOverrideKey] = true
+            }
             let data = try encoder.encode(self)
             return String(decoding: data, as: UTF8.self)
         } catch {
             throw DInitError.unableToSerializeConfig(self, error)
         }
+    }
+}
+
+extension DInitConfig: CustomStringConvertible {
+    var description: String {
+        return (try? self.jsonString(redactCredentialStrings: true)) ?? "<failed to encode DInitConfig>"
     }
 }
 
@@ -300,6 +309,9 @@ extension DInitConfig: Hashable { }
 extension DInitConfig {
     func merging(_ other: DInitConfig, uniquingKeysWith conflictResolver: (Any, Any) throws -> Any) throws -> DInitConfig {
         let encoder = JSONEncoder()
+        
+        // Please do not copy this override to other parts of the code without seriously considering what you are doing.
+        encoder.userInfo[CredentialString.redactionOverrideKey] = true
         
         let selfData = try encoder.encode(self)
         let otherData = try encoder.encode(other)

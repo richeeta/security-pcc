@@ -65,7 +65,6 @@ final class StubBackend: Backend {
 
 	func disconnectCIO(channel: Int) {
 		logger.log("Disconnecting CIO channel: \(channel, privacy: .public)")
-		// TODO: something
 	}
 
 	func sendControlMessage(node: Int, message: Data) throws {
@@ -73,7 +72,6 @@ final class StubBackend: Backend {
 			.log(
 				"Sending control message \(String(describing: message), privacy: .public) to node: \(node, privacy: .public)"
 			)
-		// TODO: something
 	}
 
 	func establishTXConnection(node: Int, cioChannelIndex: Int) {
@@ -81,7 +79,6 @@ final class StubBackend: Backend {
 			.log(
 				"Establishing tx connection to node: \(node, privacy: .public) on channel: \(cioChannelIndex, privacy: .public)"
 			)
-		// TODO: anything
 	}
 
 	func lock() throws {
@@ -113,25 +110,23 @@ final class StubBackend: Backend {
 
 	func setCryptoKey(key _: Data, flags _: UInt32) throws {
 		logger.log("Setting crypto key ")
-		// TODO: anything
 	}
-    
-    /// get the crypto key
-    func getCryptoKey() throws -> Data {
-        logger.log("Getting crypto key ")
-        // TODO: anything
-        return Data()
-    }
-    
-    /// gets the number of buffers that can be allocated per Crypto Key.
-    func getMaxBuffersPerKey() throws -> UInt64 {
-        logger.log("getting the max buffers per key")
-        return 1000
-    }
-    
-    /// gets the number of seconds that can be used for a crypto key
-    func getMaxSecondsPerKey() throws -> UInt64 {
-        logger.log("getting the max seconds per key ")
-        return 1000
-    }
+
+	/// get the crypto key
+	func getCryptoKey() throws -> Data {
+		logger.log("Getting crypto key ")
+		return Data()
+	}
+
+	/// gets the number of buffers that can be allocated per Crypto Key.
+	func getMaxBuffersPerKey() throws -> UInt64 {
+		logger.log("getting the max buffers per key")
+		return 1000
+	}
+
+	/// gets the number of seconds that can be used for a crypto key
+	func getMaxSecondsPerKey() throws -> UInt64 {
+		logger.log("getting the max seconds per key ")
+		return 1000
+	}
 }

@@ -36,7 +36,7 @@ import NIOHTTP1
 import NIOPosix
 import os
 
-fileprivate extension String {
+private extension String {
     func containsDotDot() -> Bool {
         for idx in self.indices {
             if self[idx] == "." &&
@@ -52,7 +52,7 @@ fileprivate extension String {
 }
 
 final class HTTPHandler: ChannelInboundHandler {
-    public typealias InboundIn = HTTPServerRequestPart
+    public typealias InboundIn = HTTPServerRequestPart // for ChannelInboundHandler conformance
     public typealias OutboundOut = HTTPServerResponsePart
 
     private enum State: String {
@@ -94,24 +94,21 @@ final class HTTPHandler: ChannelInboundHandler {
         }
     }
 
+    private let htdocsPath: String
+    private let fileIO: NonBlockingFileIO
+
     private var keepAlive = false
     private var state = State.idle
-    private let htdocsPath: String
-
-    private var infoSavedRequestHead: HTTPRequestHead?
-    private var infoSavedBodyBytes: Int = 0
-
-    private var continuousCount: Int = 0
-
     private var handler: ((ChannelHandlerContext, HTTPServerRequestPart) -> Void)?
-    private var handlerFuture: EventLoopFuture<Void>?
-    private let fileIO: NonBlockingFileIO
 
     public init(fileIO: NonBlockingFileIO, htdocsPath: String) {
         self.htdocsPath = htdocsPath
         self.fileIO = fileIO
     }
 
+    // httpResponseHead constructs a response header containing the requested response code, along with
+    //  any additional headers provided. A "connection" header is added for persistence based on (client)
+    //  request and HTTP version.
     private func httpResponseHead(request: HTTPRequestHead,
                                   status: HTTPResponseStatus,
                                   headers: HTTPHeaders = HTTPHeaders()) -> HTTPResponseHead
@@ -137,11 +134,16 @@ final class HTTPHandler: ChannelInboundHandler {
         return head
     }
 
+    // handleFile treats the incoming request as a file retrieval - access outside of the htdocs area is
+    //  blocked, and the resource is confirmed to be that of a regular file
     private func handleFile(context: ChannelHandlerContext,
                             request: HTTPServerRequestPart,
                             path: String)
     {
-        func sendErrorResponse(request: HTTPRequestHead, _ error: Error) {
+        // sendErrorResponse returns an error response -- the return can be used in a NonBlockingFileIO
+        //  EventLoopFuture callback (outside of which, the channel should be closed)
+        @discardableResult
+        func sendErrorResponse(request: HTTPRequestHead, _ error: Error) -> EventLoopFuture<Void> {
             var body = context.channel.allocator.buffer(capacity: 128)
             let response = { () -> HTTPResponseHead in
                 let errmsg: String
@@ -172,10 +174,10 @@ final class HTTPHandler: ChannelInboundHandler {
             }()
             context.write(Self.wrapOutboundOut(.head(response)), promise: nil)
             context.write(Self.wrapOutboundOut(.body(.byteBuffer(body))), promise: nil)
-            context.writeAndFlush(Self.wrapOutboundOut(.end(nil)), promise: nil)
-            context.channel.close(promise: nil)
+            return context.writeAndFlush(Self.wrapOutboundOut(.end(nil)))
         }
 
+        // responseHead adds Content-Length/Type headers to response when returning a file
         func responseHead(request: HTTPRequestHead, fileRegion region: FileRegion) -> HTTPResponseHead {
             var response = self.httpResponseHead(request: request, status: .ok)
             response.headers.add(name: "Content-Length", value: "\(region.endIndex)")
@@ -188,17 +190,33 @@ final class HTTPHandler: ChannelInboundHandler {
             HTTPServer.logger.log("request: \(request, privacy: .public)")
             self.keepAlive = request.isKeepAlive
             self.state.requestReceived()
-            guard !request.uri.containsDotDot() && request.method == .GET else {
+            guard request.method == .GET && !request.uri.containsDotDot() else {
                 sendErrorResponse(request: request, IOError(errnoCode: EACCES, reason: "forbidden"))
+                context.channel.close(promise: nil)
                 return
             }
 
             let path = self.htdocsPath + "/" + path
             HTTPServer.logger.debug("request: full path: \(path, privacy: .public)")
+
+            if !FileManager.isExist(path, resolve: true) {
+                sendErrorResponse(request: request, IOError(errnoCode: ENOENT, reason: "not found"))
+                context.channel.close(promise: nil)
+                return
+            }
+
+            if !FileManager.isRegularFile(path, resolve: true) {
+                sendErrorResponse(request: request, IOError(errnoCode: EINVAL, reason: "not a file"))
+                context.channel.close(promise: nil)
+                return
+            }
+
             let fileHandleAndRegion = self.fileIO.openFile(path: path, eventLoop: context.eventLoop)
             fileHandleAndRegion.whenFailure { error in
                 sendErrorResponse(request: request, error)
+                context.channel.close(promise: nil)
             }
+
             fileHandleAndRegion.whenSuccess { file, region in
                 var responseStarted = false
                 let response = responseHead(request: request, fileRegion: region)
@@ -220,13 +238,12 @@ final class HTTPHandler: ChannelInboundHandler {
                     return context.writeAndFlush(Self.wrapOutboundOut(.body(.byteBuffer(buffer))))
                 }.flatMap { () -> EventLoopFuture<Void> in
                     let p = context.eventLoop.makePromise(of: Void.self)
-                    self.completeResponse(context, trailers: nil, promise: p)
+                    self.completeResponse(context, promise: p)
                     return p.futureResult
                 }.flatMapError { error in
                     if !responseStarted {
-                        sendErrorResponse(request: request, error)
                         self.state.responseComplete()
-                        return context.writeAndFlush(Self.wrapOutboundOut(.end(nil)))
+                        return sendErrorResponse(request: request, error)
                     } else {
                         return context.close()
                     }
@@ -234,17 +251,21 @@ final class HTTPHandler: ChannelInboundHandler {
                     _ = try? file.close()
                 }
             }
+
         case .end:
-            HTTPServer.logger.log("request: END")
+            HTTPServer.logger.debug("request: END")
             self.state.requestComplete()
+
         default:
             HTTPServer.logger.error("request: UNKNOWN")
-            self.completeResponse(context, trailers: nil, promise: nil)
+            self.completeResponse(context, promise: nil)
         }
     }
 
+    // completeResponse callback is invoked at the end of the reply, setting Connection header appropriate
+    //  for the (HTTP/1.x) protocol version of the original request version (either closing for if instructed
+    //  by client, or otherwise setting our server state in preparation of another request)
     private func completeResponse(_ context: ChannelHandlerContext,
-                                  trailers: HTTPHeaders?,
                                   promise: EventLoopPromise<Void>?)
     {
         self.state.responseComplete()
@@ -253,14 +274,15 @@ final class HTTPHandler: ChannelInboundHandler {
         if !self.keepAlive {
             promise!.futureResult.whenComplete { (_: Result<Void, Error>) in context.close(promise: nil) }
         }
-        self.handler = nil
 
-        context.writeAndFlush(Self.wrapOutboundOut(.end(trailers)), promise: promise)
+        self.handler = nil
+        context.writeAndFlush(Self.wrapOutboundOut(.end(nil)), promise: promise)
         HTTPServer.logger.log("completeResponse")
     }
 
+    // channelRead callback is invoked upon incoming request from client
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        let reqPart = Self.unwrapInboundIn(data)
+        let reqPart = Self.unwrapInboundIn(data) // HTTPServerRequestPart
         if let handler = self.handler {
             handler(context, reqPart)
             return
@@ -276,17 +298,22 @@ final class HTTPHandler: ChannelInboundHandler {
                     path: request.uri.removingPercentEncoding ?? request.uri)
             }
             self.handler!(context, reqPart)
+
         case .body:
             break
+
         case .end:
-            self.completeResponse(context, trailers: nil, promise: nil)
+            self.state.requestComplete()
+            self.completeResponse(context, promise: nil)
         }
     }
 
+    // channelReadComplete callback is invoked at end of current request read
     func channelReadComplete(context: ChannelHandlerContext) {
         context.flush()
     }
 
+    // userInboundEventTriggered callback is invoked for "unexpected" events (such as client closing connection)
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
         switch event {
         case let evt as ChannelEvent where evt == ChannelEvent.inputClosed:

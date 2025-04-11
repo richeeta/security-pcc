@@ -27,11 +27,21 @@ public extension SWReleases.Release {
         typealias AssetVerifier = (URL) -> Bool
 
         let sourcePath: String? // set if loaded from a (json) file
-        let metadata: TxPB_ReleaseMetadata?
+        let metadata: TxPB_ReleaseMetadata
 
-        var timestamp: Date? { return self.metadata?.timestamp.date }
-        var releaseHash: Data? { return self.metadata?.releaseHash }
-        var assets: [Asset]? { return self.metadata?.assets }
+        var timestamp: Date { return self.metadata.timestamp.date }
+        var releaseHash: Data { return self.metadata.releaseHash }
+        var assets: [Asset] {
+            guard let override = CLIDefaults.cdnHostnameOverride else {
+                return self.metadata.assets
+            }
+
+            return self.metadata.assets.map {
+                var asset = $0
+                asset.url = asset.url.replacing(/https:\/\/[^\/]+/, with: "https://\(override)")
+                return asset
+            }
+        }
 
         // darwinInit contains DarwinInitHelper object containing attached darwin-init config
         var darwinInit: DarwinInitHelper? {
@@ -43,17 +53,25 @@ public extension SWReleases.Release {
         }
 
         // darwinInitString contains attached darwin-init JSON document as a String
-        var darwinInitString: String? { return try? self.metadata?.darwinInit.jsonString() }
+        var darwinInitString: String? {
+            return try? self.metadata.darwinInit.jsonString()
+        }
 
         init(data: Data,
-             releaseHash: Data? = nil // add releaseHash if unset (ideally already set)
+             index: UInt64? = nil,
+             releaseHash: Data? = nil // add releaseHash if unset
         ) throws {
-            guard !data.isEmpty else {
-                throw TransparencyLogError("no metadata payload")
+            var indexPrefix = ""
+            if let index {
+                indexPrefix = "[\(index)]: "
             }
 
-            guard var metadata = try? TxPB_ReleaseMetadata(serializedData: data) else {
-                throw TransparencyLogError("failed to parse metadata payload")
+            guard !data.isEmpty else {
+                throw TransparencyLogError("\(indexPrefix)no metadata payload")
+            }
+
+            guard var metadata = try? TxPB_ReleaseMetadata(serializedBytes: data) else {
+                throw TransparencyLogError("\(indexPrefix)failed to parse metadata payload")
             }
 
             if metadata.releaseHash.isEmpty, let releaseHash {
@@ -64,8 +82,14 @@ public extension SWReleases.Release {
             self.metadata = metadata
 
             if let mdjson = try? self.jsonString() {
-                SWReleases.logger.debug("metadata payload: \(mdjson, privacy: .public)")
+                SWReleases.logger.debug("\(indexPrefix)metadata payload: \(mdjson, privacy: .public)")
             }
+        }
+
+        init(leaf: TransparencyLog.ATLeaf) throws {
+            try self.init(data: leaf.metadata,
+                          index: leaf.index,
+                          releaseHash: leaf.nodeData.dataHash)
         }
 
         init(from: URL) throws {
@@ -79,16 +103,12 @@ public extension SWReleases.Release {
         }
 
         func jsonString() throws -> String {
-            return try self.metadata?.jsonString() ?? "{ }"
+            return try self.metadata.jsonString()
         }
 
         // assetsByType returns the set of Assets matching assetType
         func assetsByType(_ assetType: AssetType) -> [Asset]? {
-            guard let mdAssets = self.assets else {
-                return nil
-            }
-
-            let assets = mdAssets.filter { $0.type == assetType }
+            let assets = self.assets.filter { $0.type == assetType }
             return assets.count > 0 ? assets : nil
         }
 
@@ -127,37 +147,33 @@ public extension SWReleases.Release {
             return hostTools[0]
         }
 
+        var isDownloadable: Bool {
+            get async throws {
+                await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
+                    for asset in assets {
+                        guard let url = URL(string: asset.url) else {
+                            return false
+                        }
+
+                        group.addTask {
+                            await url.exists
+                        }
+                    }
+
+                    for await exists in group {
+                        if !exists {
+                            return false
+                        }
+                    }
+
+                    return true
+                }
+            }
+        }
+
         // assetURL returns a parsed URL for the asset
         func assetURL(_ asset: Asset) -> URL? {
             return URL(string: asset.url)
-        }
-
-        // assetTypeByName maps asset type JSON string to enum type
-        static func assetTypeByName(_ assetType: String) -> AssetType? {
-            
-            return switch assetType {
-            case "ASSET_TYPE_UNSPECIFIED": .unspecified
-            case "ASSET_TYPE_OS": .os
-            case "ASSET_TYPE_PCS": .pcs
-            case "ASSET_TYPE_MODEL": .model
-            case "ASSET_TYPE_HOST_TOOLS": .hostTools
-            case "ASSET_TYPE_DEBUG_SHELL": .debugShell
-            default: nil
-            }
-        }
-
-        // assetTypeName returns asset type enum to JSON string
-        static func assetTypeName(_ assetType: AssetType) -> String {
-            
-            return switch assetType {
-            case .unspecified: "ASSET_TYPE_UNSPECIFIED"
-            case .os: "ASSET_TYPE_OS"
-            case .pcs: "ASSET_TYPE_PCS"
-            case .model: "ASSET_TYPE_MODEL"
-            case .hostTools: "ASSET_TYPE_HOST_TOOLS"
-            case .debugShell: "ASSET_TYPE_DEBUG_SHELL"
-            default: "ASSET_TYPE_UNKNOWN"
-            }
         }
 
         // assetVariant returns the variant field of asset
@@ -194,5 +210,38 @@ public extension SWReleases.Release {
                 return expectedHash.elementsEqual(compDigest)
             }
         }
+    }
+}
+
+extension TxPB_ReleaseMetadata.FileType {
+    // assetFileType returns AssetHelper.FileType associated with TxPB_ReleaseMetadata.FileType
+    var assetFileType: AssetHelper.FileType? {
+        return switch self {
+            case .ipsw: .ipsw
+            case .diskimage: .dmg
+            case .applearchive: .aar
+            default: nil
+        }
+    }
+}
+
+extension TxPB_ReleaseMetadata.AssetType {
+    private static let labels: [TxPB_ReleaseMetadata.AssetType: String] = [
+        .unspecified: "ASSET_TYPE_UNSPECIFIED",
+        .os: "ASSET_TYPE_OS",
+        .pcs: "ASSET_TYPE_PCS",
+        .model: "ASSET_TYPE_MODEL",
+        .hostTools: "ASSET_TYPE_HOST_TOOLS",
+        .debugShell: "ASSET_TYPE_DEBUG_SHELL"
+    ]
+
+    var label: String { TxPB_ReleaseMetadata.AssetType.labels[self] ?? "ASSET_TYPE_UNKNOWN" }
+
+    init?(label: String) {
+        guard let atype = TxPB_ReleaseMetadata.AssetType.labels.first(where: {$0.value == label}) else {
+            return nil
+        }
+
+        self = atype.key
     }
 }

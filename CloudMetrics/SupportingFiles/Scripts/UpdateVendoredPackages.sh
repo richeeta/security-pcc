@@ -12,13 +12,27 @@
 # EA1937
 # 10/02/2024
 
-#!/bin/sh
+#!/bin/bash
 
-jq -r '.pins[] as $package | "\($package.identity) \($package.state.revision)"'\
-    Package.resolved | while read package_version || [[ -n $package_version ]];
-do
-    IFS=" " read package version <<< $package_version
-    echo "Updating $package..."
-    git -C Vendor/$package fetch
-    git -C Vendor/$package checkout $version
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)/Vendor"
+for dir in *; do
+  (
+      cd "${dir}"
+      old_version="$(git describe --tags --exact-match)" || continue
+      name="$(pwd)"
+      git fetch --quiet --tags origin
+      new_version="$(git describe --tags --match '[0-9].[0-9]*'  $(git rev-list --tags --max-count=1))"
+      if [ "${old_version}" == "${new_version}" ]; then
+        echo "${name} already up-to-date" >&2
+      else
+        echo "Updating ${name} from ${old_version} to ${new_version}" >&2
+        git checkout --quiet $new_version
+      fi
+  )
 done
+
+echo "Updated dependencies to latest tags." >&2
+echo "Nb. any semver-major changes may break compilation and should be discarded or this project updated." >&2
+echo "Nb. If there are new transitive dependencies then you must add these as submodules to Vendor/ and override in Xcode." >&2

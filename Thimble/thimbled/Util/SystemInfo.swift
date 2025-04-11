@@ -22,8 +22,9 @@
 import CryptoKit
 import Foundation
 import MobileGestaltPrivate
+import OSAnalytics
 
-package protocol SystemInfoProtocol {
+package protocol SystemInfoProtocol: Sendable {
     var bundleName: String? { get }
     var bundleVersion: String? { get }
     var bootSessionID: String { get }
@@ -33,61 +34,80 @@ package protocol SystemInfoProtocol {
     var productVersion: String { get }
     var productType: String { get }
     var buildVersion: String { get }
+    var automatedDeviceGroup: String? { get }
+    var osInfo: String { get }
+    var osInfoWithDeviceModel: String { get }
 }
 
 package struct SystemInfo: SystemInfoProtocol {
-    package var bundleName: String? {
-        return Bundle.main.bundleIdentifier
-    }
-
-    package var bundleVersion: String? {
-        return Bundle.main.infoDictionary?["CFBundleVersion"] as? String
-    }
+    package let bundleName: String?
+    package let bundleVersion: String?
 
     package var bootSessionID: String {
         return sysctl(name: "kern.bootsessionuuid")
     }
 
-    package var uniqueDeviceID: String {
+    package var uniqueDeviceID: String
+
+    // "macOS" / "iOS"
+    package let marketingProductName: String
+
+    package let marketingDeviceFamilyName: String
+
+    // "macOS" / "iPhone OS"
+    package let productName: String
+
+    // "14.6" / "18.0"
+    package let productVersion: String
+
+    // "Mac15,8" / "iPhone14,5"
+    package var productType: String
+
+    // "23G42" / "22A282"
+    package var buildVersion: String
+
+    package var automatedDeviceGroup: String? {
+        return OSASystemConfiguration.automatedDeviceGroup()
+    }
+
+    /// Example: `<Private> <macOS;14.4;24A281> <com.apple.privatecloudcomputed/5.504.7>`
+    /// no hwModel where <Private> is because: rdar://127889821 ([Privacy] Don't expose device model and OS version to ROPES)
+    package let osInfo: String
+
+    /// Example: `<MacBookPro18,2> <macOS;14.4;24A281> <com.apple.privatecloudcomputed/5.504.7>`
+    /// include hwModel here for Metrics reporting
+    package let osInfoWithDeviceModel: String
+
+    init(bundle: Bundle = .main, mobileGestalt: MobileGestalt = .current) {
+        self.bundleName = bundle.bundleIdentifier
+        self.bundleVersion = bundle.infoDictionary?["CFBundleVersion"] as? String
+
         #if os(macOS)
         // On macOS, the uniqueDeviceID exists but it does not
         // survive OS updates; however, this thing does.
         var uuid: uuid_t = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         var timeout: timespec = .init(tv_sec: 1, tv_nsec: 0)
         gethostuuid(&uuid, &timeout)
-        return UUID(uuid: uuid).uuidString
+        self.uniqueDeviceID = UUID(uuid: uuid).uuidString
         #else
-        return MobileGestalt.current.uniqueDeviceID
+        self.uniqueDeviceID = mobileGestalt.uniqueDeviceID
         #endif
-    }
 
-    package var marketingProductName: String {
-        // "macOS" / "iOS"
-        return MobileGestalt.current.marketingProductName
-    }
+        self.marketingProductName = mobileGestalt.marketingProductName
+        self.marketingDeviceFamilyName = mobileGestalt.marketingDeviceFamilyName
+        self.productName = mobileGestalt.productName
+        self.productVersion = mobileGestalt.productVersion
+        self.productType = mobileGestalt.productType
+        self.buildVersion = mobileGestalt.buildVersion
 
-    package var marketingDeviceFamilyName: String {
-        return MobileGestalt.current.marketingDeviceFamilyName
-    }
+        let bundleName = self.bundleName ?? "unknown"
+        let bundleVersion = self.bundleVersion ?? "unknown"
 
-    package var productName: String {
-        // "macOS" / "iPhone OS"
-        return MobileGestalt.current.productName
-    }
+        // Only include device family name (e.g. iPad), not the whole productType (e.g. MacBookPro18,2)
+        osInfo = "<\(self.marketingDeviceFamilyName)> <\(self.productName);\(self.productVersion);\(self.buildVersion)> <\(bundleName)/\(bundleVersion)>"
 
-    package var productVersion: String {
-        // "14.6" / "18.0"
-        return MobileGestalt.current.productVersion
-    }
-
-    package var productType: String {
-        // "Mac15,8" / "iPhone14,5"
-        return MobileGestalt.current.productType
-    }
-
-    package var buildVersion: String {
-        // "23G42" / "22A282"
-        return MobileGestalt.current.buildVersion
+        // Include the whole productType (e.g. MacBookPro18,2)
+        osInfoWithDeviceModel = "<\(self.productType)> <\(self.productName);\(self.productVersion);\(self.buildVersion)> <\(bundleName)/\(bundleVersion)>"
     }
 
     // MARK: - System Calls

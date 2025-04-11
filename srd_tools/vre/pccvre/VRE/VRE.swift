@@ -171,7 +171,7 @@ struct VRE {
         var copiedAssets: [CryptexSpec] = []
         for asset in instanceAssets {
             do {
-                let dstCryptexPath = try copyInImage(asset.path.string)
+                let dstCryptexPath = try copyInImage(asset.path.string, fileType: asset.fileType)
                 if let assetType = asset.assetType {
                     config.addReleaseAsset(
                         type: assetType,
@@ -192,7 +192,7 @@ struct VRE {
         var vmConfig = vmConfig
         // set osImage/variant from release info (unless passed in by caller)
         if vmConfig.osImage == nil {
-            guard let osAsset = config.lookupAssetType(type: .os) else {
+            guard let osAsset = config.lookupAssetType(.os) else {
                 throw VREError("no OS restore image defined")
             }
 
@@ -369,7 +369,7 @@ struct VRE {
 
         if !enabled {
             darwinInit.sshConfig = DarwinInitHelper.SSH(enabled: false)
-            if let shellAsset = config.lookupAssetType(type: .debugShell) {
+            if let shellAsset = config.lookupAssetType(.debugShell) {
                 darwinInit.removeCryptex(variant: shellAsset.variant)
             }
 
@@ -386,7 +386,7 @@ struct VRE {
 
         // try to determine whether we started with an " internal " variant
         var internalVariant = false
-        if let osAsset = config.lookupAssetType(type: .os) {
+        if let osAsset = config.lookupAssetType(.os) {
             internalVariant = osAsset.variant.lowercased().contains(" internal ")
         }
 
@@ -404,7 +404,7 @@ struct VRE {
                 } catch {
                     throw VREError("copy cryptex to VRE instance directory: \(error)")
                 }
-            } else if let shellAsset = config.lookupAssetType(type: .debugShell) {
+            } else if let shellAsset = config.lookupAssetType(.debugShell) {
                 // otherwise check if AssetType.debugShell available to the instance (for non-Internal builds)
                 darwinInit.addCryptex(DarwinInitHelper.Cryptex(
                     url: shellAsset.file,
@@ -431,6 +431,7 @@ struct VRE {
     //  file type (dmg, ipsw, aar). The final destination URL is returned upon success.
     func copyInImage(
         _ src: String,
+        fileType: AssetHelper.FileType? = nil,
         dstName: String? = nil,
         overwrite: Bool = false
     ) throws -> URL {
@@ -449,21 +450,25 @@ struct VRE {
             throw VREError("cannot overwrite \(dstName)")
         }
 
-        // determine image type (based on header)
         let imageFileType: AssetHelper.FileType
-        do {
-            imageFileType = try AssetHelper.fileType(srcURL)
-        } catch {
-            throw VREError("\(src): image type: \(error)")
+        if let fileType {
+            imageFileType = fileType
+        } else {
+            // determine image type (based on header)
+            do {
+                imageFileType = try AssetHelper.fileType(srcURL)
+            } catch {
+                throw VREError("\(src): image type: \(error)")
+            }
         }
 
         // .. and append an appropriate .extension as needed
-        let srcExt = srcURL.pathExtension
+        let srcExt = srcURL.pathExtension.lowercased()
         let addExt = switch imageFileType {
-        case .gz:
-            ![imageFileType.ext, "tgz"].contains(srcExt.lowercased())
+        case .targz:
+            ![imageFileType.ext, "tgz"].contains(srcExt)
         default:
-            !imageFileType.ext.isEmpty && srcExt.lowercased() != imageFileType.ext
+            !imageFileType.ext.isEmpty && srcExt != imageFileType.ext
         }
 
         if addExt {
@@ -482,7 +487,11 @@ struct VRE {
 
         do {
             try FileManager.linkFile(srcURL, dst)
-            VRE.logger.debug("copy/link \(src, privacy: .public) -> \(dst.path, privacy: .public)")
+            var ftype = imageFileType.ext.isEmpty ? "unknown" : imageFileType.ext
+            ftype += fileType == nil ? " (detected)" : " (preset)"
+
+            let info = "\(src) [type: \(ftype)] -> \(dst.path)"
+            VRE.logger.debug("copy/link \(info, privacy: .public)")
         } catch {
             throw VREError("copy/link file: \(error)")
         }
@@ -579,13 +588,13 @@ struct VRE {
     static func mountPCHostTools(
         dmgPath: String,
         checkToolsDirs: [String] = ["usr/local/bin", "System/Library"]
-    ) throws -> [DMGHelper] {
+    ) throws -> [CryptexHelper] {
         VRE.logger.log("mountPCHostTools: \(dmgPath, privacy: .public)")
-        var dmgHandles: [DMGHelper] = [] // must hold these while mounted
+        var dmgHandles: [CryptexHelper] = [] // must hold these while mounted
 
         func _doMount(_ dp: String) throws -> URL {
             do {
-                var dmg = try DMGHelper(path: dp)
+                var dmg = try CryptexHelper(path: dp)
                 try dmg.mount()
                 dmgHandles.append(dmg)
 

@@ -44,8 +44,8 @@ struct EnsembleCtl: ParsableCommand {
 			GetMaxBuffersPerKey.self,
 			GetMaxSecsKey.self,
 			GetEnsembleID.self,
-            RunServer.self,
-            RunClient.self
+			RunServer.self,
+			RunClient.self,
 		]
 	)
 }
@@ -87,7 +87,6 @@ extension EnsembleCtl {
 		}
 	}
 
-	// TODO: format this less shittily
 	struct GetNodeInfo: ParsableCommand {
 		static let configuration = CommandConfiguration(
 			abstract: "Prints info about the nodes in the ensemble."
@@ -185,59 +184,63 @@ extension EnsembleCtl {
 		}
 	}
 
-    struct RunServer: ParsableCommand {
-        static let configuration =
-            CommandConfiguration(abstract: "Gets the TLS options, and runs a server using the TLSOptions. (Requires Root)")
-    
-        @Argument(help: "The port to stand the server.")
-        var port: UInt16
-        
-        mutating func run() throws {
-            let ensembler = try EnsemblerSession()
-            let options = try ensembler.getTlsOptions()
-           
-            print("Obtained TLS options \(options.securityProtocolOptions.hash)")
-            
-            runServer(port: port, tlsOptions: options)
-        }
+	struct RunServer: ParsableCommand {
+		static let configuration =
+			CommandConfiguration(
+				abstract: "Gets the TLS options, and runs a server using the TLSOptions. (Requires Root)"
+			)
 
-        mutating func validate() throws {
-            guard geteuid() == 0 else {
-                throw ValidationError(
-                    "Encrypting the message using shared key requires Root privileges"
-                )
-            }
-        }
-    }
-    
-    struct RunClient: ParsableCommand {
-        static let configuration =
-            CommandConfiguration(abstract: "Gets the TLS options, and runs a server using the TLSOptions. (Requires Root)")
-    
-        @Argument(help: "The port on which the server listens.")
-        var port: UInt16
-        
-        @Argument(help: "The server to connect to.")
-        var server: String
-        
-        mutating func run() throws {
-            let ensembler = try EnsemblerSession()
-            let options = try ensembler.getTlsOptions()
-           
-            print("Obtained TLS options \(options.securityProtocolOptions.hash)")
-            
-            runClient(server: server, port: port, tlsOptions: options)
-        }
+		@Argument(help: "The port to stand the server.")
+		var port: UInt16
 
-        mutating func validate() throws {
-            guard geteuid() == 0 else {
-                throw ValidationError(
-                    "Encrypting the message using shared key requires Root privileges"
-                )
-            }
-        }
-    }
-    
+		mutating func run() throws {
+			let ensembler = try EnsemblerSession()
+			let options = try ensembler.getTlsOptions()
+
+			print("Obtained TLS options \(options.securityProtocolOptions.hash)")
+
+			runServer(port: self.port, tlsOptions: options)
+		}
+
+		mutating func validate() throws {
+			guard geteuid() == 0 else {
+				throw ValidationError(
+					"Encrypting the message using shared key requires Root privileges"
+				)
+			}
+		}
+	}
+
+	struct RunClient: ParsableCommand {
+		static let configuration =
+			CommandConfiguration(
+				abstract: "Gets the TLS options, and runs a server using the TLSOptions. (Requires Root)"
+			)
+
+		@Argument(help: "The port on which the server listens.")
+		var port: UInt16
+
+		@Argument(help: "The server to connect to.")
+		var server: String
+
+		mutating func run() throws {
+			let ensembler = try EnsemblerSession()
+			let options = try ensembler.getTlsOptions()
+
+			print("Obtained TLS options \(options.securityProtocolOptions.hash)")
+
+			runClient(server: self.server, port: self.port, tlsOptions: options)
+		}
+
+		mutating func validate() throws {
+			guard geteuid() == 0 else {
+				throw ValidationError(
+					"Encrypting the message using shared key requires Root privileges"
+				)
+			}
+		}
+	}
+
 	struct Decrypt: ParsableCommand {
 		static let configuration =
 			CommandConfiguration(

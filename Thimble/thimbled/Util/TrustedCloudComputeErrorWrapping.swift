@@ -41,6 +41,7 @@ extension TrustedCloudComputeError {
                 case .failedToValidateAllAttestations: .failedToValidateAllAttestations
                 case .responseSummaryIndicatesFailure: .responseSummaryIndicatesFailure
                 case .responseSummaryIndicatesUnauthenticated: .responseSummaryIndicatesUnauthenticated
+                case .responseSummaryIndicatesInternalError: .responseSummaryIndicatesInternalError
                 case .responseSummaryIndicatesInvalidRequest: .responseSummaryIndicatesInvalidRequest
                 case .missingAttestationBundle: .missingAttestationBundle
                 case .invalidAttestationBundle: .invalidAttestationBundle

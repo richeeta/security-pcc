@@ -20,19 +20,20 @@
 //
 
 import class Foundation.NSString
-import protocol Logging.LogHandler
-import struct Logging.Logger
-import os
+private import protocol Logging.LogHandler
+package import struct Logging.Logger
+internal import os
 
-public struct OSLogger: LogHandler {
+package struct OSLogger: LogHandler {
     private let osLog: OSLog
 
     /// This default log level is internal-only as we forward all logs to the OSLog system to allow it to filter by
     /// level. Thus, this logLevel only exists to have a default log level for swift-log
-    public var logLevel: Logger.Level = .debug
-    public var metadata = Logger.Metadata()
+    package var logLevel: Logger.Level = .debug
+    package var metadata = Logger.Metadata()
 
-    public init(label: String) {
+    @Sendable
+    package init(label: String) {
         let components = label.split(separator: ":")
         if components.count < 2 {
             self.osLog = OSLog(subsystem: label, category: "")
@@ -44,13 +45,13 @@ public struct OSLogger: LogHandler {
     }
 
     // swiftlint:disable:next function_parameter_count
-    public func log(level: Logger.Level,
-                    message: Logger.Message,
-                    metadata: Logger.Metadata?,
-                    source: String,
-                    file: String,
-                    function: String,
-                    line: UInt) {
+    package func log(level: Logger.Level,
+                     message: Logger.Message,
+                     metadata: Logger.Metadata?,
+                     source: String,
+                     file: String,
+                     function: String,
+                     line: UInt) {
         let prettyMetadata = self.metadata
             .merging(metadata ?? [:]) { $1 }
             .map { "\($0)=\($1)" }
@@ -68,7 +69,7 @@ public struct OSLogger: LogHandler {
                logMessage as NSString)
     }
 
-    public subscript(metadataKey metadataKey: String) -> Logger.Metadata.Value? {
+    package subscript(metadataKey metadataKey: String) -> Logger.Metadata.Value? {
         get { self.metadata[metadataKey] }
         set { self.metadata[metadataKey] = newValue }
     }

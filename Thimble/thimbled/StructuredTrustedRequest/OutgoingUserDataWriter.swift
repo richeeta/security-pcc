@@ -19,11 +19,10 @@
 //  Copyright © 2024 Apple Inc. All rights reserved.
 //
 
-import AtomicsInternal
 import CollectionsInternal
 import Foundation
 import PrivateCloudCompute
-import os.lock
+import Synchronization
 
 package struct OutgoingUserData {
     var data: Data
@@ -141,13 +140,13 @@ final class OutgoingUserDataWriter: NSObject {
         }
     }
 
-    private let stateLock: OSAllocatedUnfairLock<StateMachine> = .init(initialState: .init())
-    private let waiterIDGenerator = ManagedAtomic(0)
+    private let stateLock: Mutex<StateMachine> = Mutex(StateMachine())
+    private let waiterIDGenerator = Atomic(0)
 }
 
 extension OutgoingUserDataWriter: OutgoingUserDataWriterProtocol {
     func withNextOutgoingElement<Result>(_ closure: (OutgoingUserData) async throws -> Result) async throws -> Result {
-        let waiterID = self.waiterIDGenerator.loadThenWrappingIncrement(ordering: .relaxed)
+        let (waiterID, _) = self.waiterIDGenerator.wrappingAdd(1, ordering: .relaxed)
 
         return try await withTaskCancellationHandler {
             let (writeDoneContinuation, element) = try await withCheckedThrowingContinuation {

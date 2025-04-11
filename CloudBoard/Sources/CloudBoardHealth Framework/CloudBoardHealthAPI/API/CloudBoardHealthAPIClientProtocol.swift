@@ -44,7 +44,7 @@ public enum CloudBoardHealthState: Codable, CustomStringConvertible, Sendable {
     case unhealthy
 }
 
-public protocol CloudBoardHealthAPIClientToServerProtocol: AnyActor, Sendable {
+public protocol CloudBoardHealthAPIClientToServerProtocol: Actor {
     func getHealthState() async throws -> CloudBoardHealthState
 }
 

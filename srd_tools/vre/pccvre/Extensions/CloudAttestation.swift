@@ -25,3 +25,8 @@ extension CloudAttestation.Environment {
         self = e
     }
 }
+
+extension CloudAttestation.Release {
+    // name returns Release digest as simple hex string (unlike description, doesn't include digest algo)
+    var name: String { self.digest().bytes.hexString }
+}

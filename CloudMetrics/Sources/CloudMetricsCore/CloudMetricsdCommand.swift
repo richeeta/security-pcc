@@ -20,12 +20,17 @@
 //  Created by Andrea Guzzo on 8/29/22.
 //
 
-import ArgumentParser
-import Logging
-import os
+package import ArgumentParser
+private import CloudMetricsConstants
+package import CloudMetricsHealthFramework
+private import Logging
+internal import os
+#if canImport(SecureConfigDB)
+@_weakLinked private import SecureConfigDB
+#endif
 
-public struct CloudMetricsdCommand: AsyncParsableCommand {
-    public static var configuration = CommandConfiguration(
+package struct CloudMetricsdCommand: AsyncParsableCommand {
+    package static let configuration = CommandConfiguration(
         commandName: "cloudmetricsd",
         abstract: "agent aggregating cloud workload metrics to a metrics backend.",
         discussion: """
@@ -36,46 +41,130 @@ public struct CloudMetricsdCommand: AsyncParsableCommand {
     )
 
     @Option(help: "Path to plist file containing cloudmetricsd configuration")
-    internal var configurationFile: String?
+    package var configurationFile: String?
 
-    public init() {}
 
-    public func run() async throws {
-        // Setup the os logging backend
+    package init() {}
+
+    package func run() async throws {
+        try await CloudMetricsdRunner().run(configurationFile: self.configurationFile)
+    }
+}
+
+package final class CloudMetricsdRunner: Sendable {
+
+    private let healthServer: CloudMetricsHealthServer
+    private let healthContinuation: AsyncStream<CloudMetricsHealthState>.Continuation
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsdCommand")
+
+    package init() {
+        let (stream, continuation) = AsyncStream<CloudMetricsHealthState>.makeStream()
+        self.healthServer = .init(healthStream: stream)
+        self.healthContinuation = continuation
+    }
+
+    package func run(configurationFile: String?) async throws {
+        do {
+            try await doRun(configurationFile: configurationFile)
+        } catch {
+            logger.error("""
+                Cloudmetricsd threw error. \
+                error=\(String(reportable: error), privacy: .public)
+                """)
+            throw error
+        }
+    }
+
+    private func doRun(configurationFile: String?) async throws {
+        self.logger.log("Cloudmetricsd initialising")
+        // Setup the os logging backend to SwiftLog.
+        // Nb. SwiftLog and os_log are two different logging solutions with
+        // different design choices. We bridge them together.
         LoggingSystem.bootstrap(OSLogger.init)
-        var logger = Logger(label: "Command")
-        logger.logLevel = .debug
-
-        let healthServer = CloudMetricsHealthServer()
-        var cloudmetricsd: CloudMetricsDaemon? = nil
+        healthServer.updateHealthState(to: .initializing)
 
         try await withThrowingTaskGroup(of: Void.self) { group in
-
-            // start health server
+            //  health server
             group.addTask {
-                await healthServer.run()
-            }
-            
-            // start CloudMetricsDaemon
-            do {
-                await healthServer.updateHealthState(to: .initializing)
-                let daemon = try await CloudMetricsDaemon(configurationFile: configurationFile)
-                group.addTask {
-                    try await daemon.run()
+                self.logger.log("Health server starting")
+                defer {
+                    self.logger.log("Health server stopped")
                 }
-                cloudmetricsd = daemon
-                await healthServer.updateHealthState(to: .healthy)
-            } catch {
-                logger.error("Failed starting cloudmetricsd ☠️, will keep health server running: \(error)")
-                await healthServer.updateHealthState(to: .unhealthy)
+                try await self.healthServer.run()
             }
 
-            // wait for all tasks to complete, this ensures we keep the health server running if
-            // the CloudMetricsDaemon fails to run
+            // Run CloudMetricsDaemon
+            group.addTask {
+                let configuration: Configuration
+                let auditLists = try await self.loadMetricAuditLists()
+                if let configurationFile {
+                    self.logger.log("Loading configuration. config_file=\(configurationFile, privacy: .public)")
+                    configuration = try .init(configurationFile: configurationFile, auditLists: auditLists)
+                } else {
+                    self.logger.log("Loading configuration from CFPrefs")
+                    configuration = try .makeFromCFPrefs(auditLists: auditLists)
+                }
+                self.logger.log("Configuration loaded. configuration=\(String(describing: configuration), privacy: .public)")
+                self.logger.log("cloudmetricsd starting")
+                defer {
+                    self.logger.log("cloudmetricsd stopped")
+                }
+                let cloudmetricsd = CloudMetricsDaemon(
+                    configuration: configuration,
+                    healthContinuation: self.healthContinuation)
+                self.healthServer.updateHealthState(to: .healthy)
+                try await cloudmetricsd.run()
+            }
+
+            do {
+                try await group.next()
+            } catch {
+                self.logger.error("""
+                    Child task threw error. \
+                    error=\(error, privacy: .public)
+                    """)
+            }
+            self.logger.log("Child task exited. Marking as unhealthy")
+            // Nb. We (kinda unusually) don't just cancel everything and exit here.
+            // Reason being that it becomes too easy for cloudmetricsd too enter a crash loop
+            // and bring down the entire ensemble with it.
+            healthServer.updateHealthState(to: .unhealthy)
             try await group.waitForAll()
         }
+    }
 
-        logger.info("cloudmetricsd shutting down")
-        try await cloudmetricsd?.shutdown()
+    private func loadMetricAuditLists() async throws -> Configuration.AuditLists? {
+        if #_hasSymbol(SecureConfigParameters.self),
+            try SecureConfigParameters.loadContents().metricsFilteringEnforced ?? false,
+            let logPolicyPath = try SecureConfigParameters.loadContents().logPolicyPath {
+
+            let plistPath = URL(filePath: "\(logPolicyPath)/metrics_audit_list.plist")
+            // Audit lists can come from another cryptex.
+            // cloudmetrics may be started before that other cryptex is available.
+            // We therefore need to wait until that file is available.
+            //
+            // I considered making cloudmetricsd crash eventually if the file never becomes
+            // available. However, decided against this for the time being. We've had
+            // trouble before whereby crashes of cloudmetricsd cause us to tear down
+            // the entire ensemble and it's all a bit painful to debug.
+            while !FileManager.default.fileExists(atPath: plistPath.path()) {
+                logger.log("""
+                    Waiting for metrics audit list to become available. \
+                    metrics_audit_list_path=\(plistPath.path(), privacy: .public)
+                    """)
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            logger.log("Loading audit lists. metric_audit_lists_path=\(plistPath, privacy: .public)")
+            let decoder = PropertyListDecoder()
+
+            return try decoder.decode(Configuration.AuditLists.self, from: Data(contentsOf: plistPath))
+        } else {
+            logger.log("Not using metric audit lists")
+            return nil
+        }
+    }
+
+    package var healthState: CloudMetricsHealthFramework.CloudMetricsHealthState {
+        self.healthServer.getHealthState()
     }
 }

@@ -219,7 +219,7 @@ final class Apply: AsyncParsableCommand {
 			}
 
 			// Serialize config
-			var prettyJson = try loadedConfig.config.jsonString()
+            var prettyJson = try loadedConfig.config.jsonString(redactCredentialStrings: true)
 
 			// validate entire config under specified policy and only apply if valid
 			if let policyString = loadedConfig.config.configSecurityPolicy {
@@ -241,14 +241,14 @@ final class Apply: AsyncParsableCommand {
 			}
 
 			// Serialize applied config
-			prettyJson = try result.jsonString()
+            prettyJson = try result.jsonString(redactCredentialStrings: true)
 			logger.log("Applied configuration: \(prettyJson)")
 
 			let fullyApplied = (result == loadedConfig.config)
 
 			if system {
 				// Write applied config to cookie file
-				try kDInitDoneFilepath.save(prettyJson)
+                try kDInitDoneFilepath.save(try result.jsonString(redactCredentialStrings: false))
 			}
 
 			// Check if applied config matches expected config

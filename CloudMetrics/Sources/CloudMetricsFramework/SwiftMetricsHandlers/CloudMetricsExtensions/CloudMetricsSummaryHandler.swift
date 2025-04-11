@@ -19,6 +19,8 @@
 //  Created by Andrea Guzzo on 8/3/23.
 //
 
+internal import CloudMetricsConstants
+internal import CloudMetricsXPC
 import Foundation
 import os
 
@@ -27,6 +29,7 @@ public class Summary {
     private let label: String
     private let dimensions: [(String, String)]
     private let quantiles: [Double]
+    private static let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsHandler")
 
     /// Alternative way to create a new `Summary`, while providing an explicit `SummaryHandler`.
     ///
@@ -89,6 +92,7 @@ public class Summary {
 extension Summary {
     public convenience init(label: String, dimensions: [(String, String)], quantiles: [Double]) throws {
         guard let factory = CloudMetrics.sharedFactory else {
+            Self.logger.warning("Attempted to create a summary before the factory was initialised")
             throw CloudMetricsTypeError.apiMisuse("Factory not initiliazed")
         }
         let handler = factory.makeSummary(label: label, dimensions: dimensions, quantiles: quantiles)
@@ -98,7 +102,11 @@ extension Summary {
     /// Signal the underlying metrics library that this recorder will never be updated again.
     /// In response the library MAY decide to eagerly release any resources held by this `Summary`.
     public func destroy() {
-        CloudMetrics.sharedFactory?.destroySummary(self._handler)
+        guard let factory = CloudMetrics.sharedFactory else {
+            Self.logger.warning("Attempted to destroy a summary before the factory was initialised")
+            return
+        }
+        factory.destroySummary(self._handler)
     }
 }
 
@@ -106,70 +114,32 @@ public protocol SummaryHandler: AnyObject, RecorderHandler {
     func record(quantileValues: [Double], sum: Double, count: Int)
 }
 
-internal class CloudMetricsSummaryHandler: SummaryHandler {
+internal final class CloudMetricsSummaryHandler: SummaryHandler {
     private let summary: CloudMetricsSummary
-    private let logger: Logger
-    private weak var cloudMetrics: CloudMetricsFactory?
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsRecorderHandler")
+    private let metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation
 
-    internal init(cloudMetrics: CloudMetricsFactory, summary: CloudMetricsSummary) {
+    internal init(metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation, summary: CloudMetricsSummary) {
         self.summary = summary
-        self.logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsRecorderHandler")
-        self.cloudMetrics = cloudMetrics
+        self.metricUpdateContinuation = metricUpdateContinuation
     }
 
     internal func record(_ value: Int64) {
         let summary = self.summary
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordInteger(summary: summary,
-                                                                   quantiles: summary.quantiles,
-                                                                   value: value,
-                                                                   epoch: epoch)
-                } catch {
-                    logger.debug("Can't record integer for '\(summary.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordSummaryInteger(.init(summary, quantiles: summary.quantiles, value: value, epoch: epoch)))
     }
 
     internal func record(_ value: Double) {
         let summary = self.summary
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordDouble(summary: summary,
-                                                                  quantiles: summary.quantiles,
-                                                                  value: value,
-                                                                  epoch: epoch)
-                } catch {
-                    logger.debug("Can't record double for '\(summary.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordSummaryDouble(.init(summary, quantiles: summary.quantiles, value: value, epoch: epoch)))
     }
 
     internal func record(quantileValues: [Double], sum: Double, count: Int) {
         let summary = self.summary
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordQuantiles(summary: summary,
-                                                                     quantiles: summary.quantiles,
-                                                                     quantileValues: quantileValues,
-                                                                     sum: sum,
-                                                                     count: count,
-                                                                     epoch: epoch)
-                } catch {
-                    logger.debug("Can't record double for '\(summary.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordSummaryQuantiles(
+            .init(summary, quantiles: summary.quantiles, values: quantileValues, sum: sum, count: count, epoch: epoch)))
     }
 }

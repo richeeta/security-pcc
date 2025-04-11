@@ -1,0 +1,11 @@
+//
+//  StaticLibrary.xcconfig
+//  CloudMetrics
+//
+//  Created by Oliver Chick (ORAC) on 05/12/2024.
+//
+
+#include "Base.xcconfig"
+
+SKIP_INSTALL = YES
+

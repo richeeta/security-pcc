@@ -23,15 +23,18 @@ extension TransparencyLog {
     struct Leaves {
         let endpoint: URL
         let tlsInsecure: Bool
+        let useIdentity: Bool
         let logTree: TxPB_ListTreesResponse.Tree
 
         init(
             endpoint: URL, // KTInitBag: at-researcher-log-leaves
             tlsInsecure: Bool = false,
+            useIdentity: Bool = false,
             logTree: TxPB_ListTreesResponse.Tree
         ) {
             self.endpoint = endpoint
             self.tlsInsecure = tlsInsecure
+            self.useIdentity = useIdentity
             self.logTree = logTree
         }
 
@@ -43,14 +46,14 @@ extension TransparencyLog {
             requestUUID: UUID = UUID(),
             nodeDecoder: (TxPB_LogLeavesResponse.Leaf) -> NodeType?
         ) async throws -> [NodeType] {
-            TransparencyLog.logger.debug("LogLeaves.fetch(\(startIndex, privacy: .public)..\(endIndex, privacy: .public))")
+            TransparencyLog.logger.debug("LogLeaves.fetch(indexes:\(startIndex, privacy: .public)..\(endIndex, privacy: .public))")
             let logLeavesReq = TxPB_LogLeavesRequest.with { builder in
                 builder.version = .v3
                 builder.treeID = self.logTree.treeID
                 builder.startMergeGroup = 0
                 builder.endMergeGroup = UInt32(self.logTree.mergeGroups)
                 builder.startIndex = startIndex
-                builder.endIndex = endIndex
+                builder.endIndex = endIndex // note: this is an open index (endIndex is not included)
                 builder.requestUuid = requestUUID.uuidString
             }
 
@@ -60,33 +63,34 @@ extension TransparencyLog {
                     "endMergeGroup:\(logLeavesReq.endMergeGroup); " +
                     "startIndex:\(logLeavesReq.startIndex); " +
                     "endIndex:\(logLeavesReq.endIndex)"
-                TransparencyLog.logger.debug("LogLeaves.fetch: \(fetchFields, privacy: .public)")
+                TransparencyLog.logger.debug("LogLeaves.fetch(index): \(fetchFields, privacy: .public)")
             }
 
-            let (respData, _) = try await postPBURL(
-                logger: TransparencyLog.traceLog ? TransparencyLog.logger : nil,
+            let (respData, _) = try await urlPostProtbuf(
                 url: self.endpoint,
                 tlsInsecure: self.tlsInsecure,
+                useIdentity: self.useIdentity,
                 requestBody: logLeavesReq.serializedData(),
                 headers: [TransparencyLog.requestUUIDHeader: requestUUID.uuidString]
             )
 
-            let leavesResp = try TxPB_LogLeavesResponse(serializedData: respData)
+            let leavesResp = try TxPB_LogLeavesResponse(serializedBytes: respData)
             guard leavesResp.status == .ok else {
                 throw TransparencyLogError("response: status=\(leavesResp.status)")
             }
-            TransparencyLog.logger.debug("LogLeaves.fetch: total retrieved: \(leavesResp.leaves.count, privacy: .public)")
+            TransparencyLog.logger.debug("LogLeaves.fetch(index): total retrieved: \(leavesResp.leaves.count, privacy: .public)")
 
             var leaves: [NodeType] = []
             for leaf in leavesResp.leaves {
-                guard let leaf = nodeDecoder(leaf) else {
-                    continue
+                if let leaf = nodeDecoder(leaf) {
+                    leaves.append(leaf)
                 }
-
-                leaves.append(leaf)
             }
 
-            TransparencyLog.logger.debug("LogLeaves.fetch: filtered: \(leaves.count, privacy: .public)")
+            if leaves.count != leavesResp.leaves.count {
+                TransparencyLog.logger.debug("LogLeaves.fetch(index): after filtering: \(leaves.count, privacy: .public)")
+            }
+
             return leaves
         }
 
@@ -95,9 +99,7 @@ extension TransparencyLog {
             requestUUID: UUID = UUID(),
             nodeDecoder: (TxPB_LogLeavesForRevisionResponse.Leaf) -> NodeType?
         ) async throws -> [NodeType] {
-            let logger = TransparencyLog.logger
-
-            logger.debug("LogLeaves.fetch(revision: \(revision)")
+            TransparencyLog.logger.debug("LogLeaves.fetch(revision: \(revision)")
             let logLeavesReq = TxPB_LogLeavesForRevisionRequest.with { builder in
                 builder.version = .v3
                 builder.logType = self.logTree.logType
@@ -105,30 +107,31 @@ extension TransparencyLog {
                 builder.requestUuid = requestUUID.uuidString
             }
 
-            let (respData, _) = try await postPBURL(
-                logger: TransparencyLog.logger,
+            let (respData, _) = try await TransparencyLog.urlPostProtbuf(
                 url: self.endpoint,
                 tlsInsecure: self.tlsInsecure,
+                useIdentity: self.useIdentity,
                 requestBody: logLeavesReq.serializedData(),
                 headers: [TransparencyLog.requestUUIDHeader: requestUUID.uuidString]
             )
 
-            let leavesResp = try TxPB_LogLeavesForRevisionResponse(serializedData: respData)
+            let leavesResp = try TxPB_LogLeavesForRevisionResponse(serializedBytes: respData)
             guard leavesResp.status == .ok else {
                 throw TransparencyLogError("response: status=\(leavesResp.status.rawValue)")
             }
-            logger.debug("  total retrieved: \(leavesResp.leaves.count)")
+            TransparencyLog.logger.debug("LogLeaves.fetch(revision): total retrieved: \(leavesResp.leaves.count)")
 
             var leaves: [NodeType] = []
             for leaf in leavesResp.leaves {
-                guard let leaf = nodeDecoder(leaf) else {
-                    continue
+                if let leaf = nodeDecoder(leaf) {
+                    leaves.append(leaf)
                 }
-
-                leaves.append(leaf)
             }
 
-            logger.debug("  filtered: \(leaves.count)")
+            if leaves.count != leavesResp.leaves.count {
+                TransparencyLog.logger.debug("LogLeaves.fetch(revision): after filtering: \(leaves.count, privacy: .public)")
+            }
+
             return leaves
         }
     }

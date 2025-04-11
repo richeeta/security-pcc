@@ -13,7 +13,7 @@
 // 10/02/2024
 
 //  Copyright © 2023 Apple Inc. All rights reserved.
-import CloudBoardCommon
+internal import CloudBoardCommon
 
 internal let kCloudBoardControllerAPIXPCLocalServiceEntitlement =
     "com.apple.private.cloudos.cloudboardcontroller"

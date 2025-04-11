@@ -245,6 +245,9 @@ public struct Heartbeat {
         /// Whether a workload is enabled.
         public var workloadEnabled: Bool?
 
+        // AdditionalProperties field in CF pref
+        public var additionalProperties: [String: String]?
+
         /// Creates a new metadata value.
         /// - Parameters:
         ///   - cloudOSReleaseType: The cloudOS release type.
@@ -253,13 +256,15 @@ public struct Heartbeat {
         ///   - serverOSBuildVersion: The serverOS build version.
         ///   - configVersion: The hot properties version.
         ///   - workloadEnabled: Whether a workload is enabled.
+        ///   - additionalProperties: AdditionalProperties field in CF pref
         public init(
             cloudOSReleaseType: String? = nil,
             cloudOSBuilderVersion: String? = nil,
             serverOSReleaseType: String? = nil,
             serverOSBuildVersion: String? = nil,
             configVersion: String? = nil,
-            workloadEnabled: Bool? = nil
+            workloadEnabled: Bool? = nil,
+            additionalProperties: [String: String]? = nil
         ) {
             self.cloudOSReleaseType = cloudOSReleaseType
             self.cloudOSBuilderVersion = cloudOSBuilderVersion
@@ -267,6 +272,7 @@ public struct Heartbeat {
             self.serverOSBuildVersion = serverOSBuildVersion
             self.configVersion = configVersion
             self.workloadEnabled = workloadEnabled
+            self.additionalProperties = additionalProperties
         }
     }
 
@@ -333,7 +339,12 @@ extension HeartbeatHTTPClient {
                         serverOSReleaseType: metadata.serverOSReleaseType,
                         serverOSBuildVersion: metadata.serverOSBuildVersion,
                         configVersion: metadata.configVersion,
-                        workloadEnabled: metadata.workloadEnabled
+                        workloadEnabled: metadata.workloadEnabled,
+                        additionalProperties: metadata.additionalProperties
+                            .flatMap {
+                                Components.Schemas.PayloadMetadata.additionalPropertiesPayload
+                                    .init(additionalProperties: $0)
+                            }
                     )
                 )
             )

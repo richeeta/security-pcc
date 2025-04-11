@@ -27,8 +27,6 @@ actor NullCloudController {
     private let controller: CloudBoardWorkloadController
     private let config: NullCloudControllerConfiguration
     private var connectionID = 0
-    private var sendErrors = false
-    private var sendBusys = false
     private let xpcServer: NullCloudControllerAPIXPCServer
 
     public init() async throws {
@@ -60,8 +58,9 @@ actor NullCloudController {
         while true {
             let connectionID = self.connectionID
             await self.controller.connect()
+            await self.xpcServer.start(delegate: self)
 
-            Self.log.log("Sending RegisterWorkload…")
+            Self.log.log("Sending RegisterWorkload...")
             try await self.controller.registerWorkload(
                 config: WorkloadConfig(
                     maxBatchSize: self.controller.prefs.maxBatchSize,
@@ -74,40 +73,18 @@ actor NullCloudController {
                 )
             )
 
-            await self.xpcServer.start(delegate: self)
-
-            var lastSentHealth: WorkloadControllerState?
-            func updateHealthStatusIfChanged(_ state: WorkloadControllerState) async throws {
-                if lastSentHealth != state {
-                    Self.log.log("Sending UpdateHealthStatus \(state)")
-                    lastSentHealth = state
-                    try await self.controller.updateHealthStatus(
-                        status: WorkloadControllerStatus(
-                            state: state
-                        )
-                    )
-                }
-            }
-
-            try await updateHealthStatusIfChanged(.ready)
+            Self.log.log("Sending ready status...")
+            try await self.controller.updateHealthStatus(
+                status: WorkloadControllerStatus(
+                    state: .ready
+                )
+            )
 
             while self.connectionID == connectionID {
-                try await updateHealthStatusIfChanged(.ready)
                 try await Task.sleep(for: .seconds(5))
-
-                if self.sendErrors {
-                    try await updateHealthStatusIfChanged(.error(message: "<test error>"))
-                    try await Task.sleep(for: .seconds(5))
-                }
-
-                if self.sendBusys {
-                    try await updateHealthStatusIfChanged(.busy)
-                    try await Task.sleep(for: .seconds(5))
-                }
             }
 
             Self.log.warning("Detected cloudboardd disconnect, re-registering")
-            lastSentHealth = nil
         }
     }
 }
@@ -116,5 +93,9 @@ extension NullCloudController: NullCloudControllerAPIServerDelegateProtocol {
     func updateState(state: WorkloadControllerState) async throws -> String {
         try await self.controller.updateHealthStatus(status: .init(state: state))
         return "Updated state to: \(state)"
+    }
+
+    func restartPrewarmedInstances() async throws {
+        try await self.controller.restartPrewarmedInstances()
     }
 }

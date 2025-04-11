@@ -128,7 +128,7 @@ public struct NodeValidator: Validator, Sendable {
         switch self.environment {
         case .production:
             [.customer]
-        case .carry, .staging, .qa:
+        case .carry, .uat, .staging, .qa:
             [.customer, .carry]
         case .dev, .ephemeral, .perf, .qa2Primary, .qa2Internal:
             [.customer, .carry, .none]

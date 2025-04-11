@@ -48,7 +48,10 @@ struct UserDefaultsStore: DailyActiveUsersReporterStore {
     }
 }
 
-actor DailyActiveUsersReporter<Store: DailyActiveUsersReporterStore> {
+actor DailyActiveUsersReporter<
+    Store: DailyActiveUsersReporterStore,
+    SystemInfo: SystemInfoProtocol
+> {
 
     private var lastReportedBeginOfDayInUTC: Date
 
@@ -56,8 +59,8 @@ actor DailyActiveUsersReporter<Store: DailyActiveUsersReporterStore> {
     let calendar: Calendar
     let store: Store
 
-    init(store: Store = UserDefaultsStore()) {
-        self.clientInfo = tc2OSInfoWithDeviceModel
+    init(systemInfo: SystemInfo, store: Store = UserDefaultsStore()) {
+        self.clientInfo = systemInfo.osInfoWithDeviceModel
         self.store = store
 
         self.lastReportedBeginOfDayInUTC = self.store.getLastReportedBeginOfDayInUTC()

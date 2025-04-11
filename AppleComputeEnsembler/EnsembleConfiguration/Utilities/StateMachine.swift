@@ -46,7 +46,7 @@ class BaseStateMachine {
 			}
 		}
 		set {
-			stateQ.sync {
+			self.stateQ.sync {
 				// The old and new values for the `_status` object are logged. The `EnsemblerStatus`
 				// description does NOT expose private info.
 				Self.logger.log(
@@ -84,7 +84,7 @@ class BaseStateMachine {
 			return self.isAllowedTransitionForSingleNode(targetState: targetState)
 		}
 		let allowedTransitions: [EnsemblerStatus: [EnsemblerStatus]] = [
-			.initializingDarwinInitCheckInProgress:[.initializing],
+			.initializingDarwinInitCheckInProgress: [.initializing],
 			.initializingActivationChecksOK: [.initializingDarwinInitCheckInProgress],
 			.coordinating: [.initializing, .initializingActivationChecksOK],
 		]
@@ -109,11 +109,11 @@ class LeaderStateMachine: BaseStateMachine, StateMachine {
 	}
 
 	func goto(targetState: EnsemblerStatus) throws {
-		let allowTransition: Bool
-		if let allowTransitionForDefaultCase = super.isAllowedTransition(targetState: targetState) {
-			allowTransition = allowTransitionForDefaultCase
+		let allowTransition: Bool = if let allowTransitionForDefaultCase = super
+			.isAllowedTransition(targetState: targetState) {
+			allowTransitionForDefaultCase
 		} else {
-			allowTransition = self.isAllowedTransition(targetState: targetState)
+			self.isAllowedTransition(targetState: targetState)
 		}
 
 		// Fail if the transition is disallowed.
@@ -151,11 +151,11 @@ class FollowerStateMachine: BaseStateMachine, StateMachine {
 	}
 
 	func goto(targetState: EnsemblerStatus) throws {
-		let allowTransition: Bool
-		if let allowTransitionForDefaultCase = super.isAllowedTransition(targetState: targetState) {
-			allowTransition = allowTransitionForDefaultCase
+		let allowTransition: Bool = if let allowTransitionForDefaultCase = super
+			.isAllowedTransition(targetState: targetState) {
+			allowTransitionForDefaultCase
 		} else {
-			allowTransition = self.isAllowedTransition(targetState: targetState)
+			self.isAllowedTransition(targetState: targetState)
 		}
 
 		// Fail if the transition is disallowed.

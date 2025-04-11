@@ -19,16 +19,18 @@
 //  Created by Andrea Guzzo on 8/29/22.
 //
 
-import CloudMetricsFramework
+internal import CloudMetricsConstants
+internal import CloudMetricsXPC
 import Foundation
-import os
-
-private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsService")
+internal import os
 
 // swiftlint:disable function_parameter_count
-internal final class CloudMetricsService: CloudMetricsServerProtocol {
+internal final class CloudMetricsService: CloudMetricsServerProtocol, Sendable {
     private let manager: CloudMetricsPublisher
     private let metricsFilter: MetricsFilter
+    private static let debugMetricPrefixes: OSAllocatedUnfairLock<[String]?> = .init(initialState: nil)
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsService")
+
     internal init(
         manager: CloudMetricsPublisher,
         metricsFilter: MetricsFilter
@@ -38,7 +40,7 @@ internal final class CloudMetricsService: CloudMetricsServerProtocol {
     }
 
     internal func setConfiguration(_ configuration: CloudMetricsConfigurationDictionary, client: String) async throws {
-        logger.debug("setConfiguration(client: \(client, privacy: .public), overrides: \(configuration.overrides, privacy: .private)")
+        logger.log("setConfiguration(client: \(client, privacy: .public), overrides: \(configuration.overrides, privacy: .private)")
         if let store = try manager.getMetricsStore(for: client) {
             await withThrowingTaskGroup(of: Void.self) { group in
                 for (id, override) in configuration.overrides {
@@ -178,11 +180,17 @@ internal final class CloudMetricsService: CloudMetricsServerProtocol {
             throw CloudMetricsServiceError.metricNotAllowed
         }
         debugMetric(metric: counter, message: "resetCounter", value: "", client: client, logger: logger)
-        try await manager.getMetricsStore(for: client)?.counterReset(
-            label: counter.label,
-            dimensions: counter.dimensions,
-            initialValue: Double(initialValue)
-        )
+
+        let metricsStore = try manager.getMetricsStore(for: client)
+        if let openTelemetryStore = metricsStore as? OpenTelemetryStore {
+            try openTelemetryStore.counterReset(label: counter.label, dimensions: counter.dimensions, initialValue: initialValue)
+        } else {
+            try await metricsStore?.counterReset(
+                label: counter.label,
+                dimensions: counter.dimensions,
+                initialValue: Double(initialValue)
+            )
+        }
     }
 
     internal func recordInteger(histogram: CloudMetricsHistogram,
@@ -271,7 +279,7 @@ internal final class CloudMetricsService: CloudMetricsServerProtocol {
         )
     }
 
-    internal func recordQuantiles(summary: CloudMetricsFramework.CloudMetricsSummary,
+    internal func recordQuantiles(summary: CloudMetricsSummary,
                                   quantiles: [Double],
                                   quantileValues: [Double],
                                   sum: Double,
@@ -297,16 +305,29 @@ internal final class CloudMetricsService: CloudMetricsServerProtocol {
             timestamp: Date(timeIntervalSince1970: epoch)
         )
     }
-}
+    
+    private static func debugMetricPrefixArray() -> [String] {
+        self.debugMetricPrefixes.withLock { debugMetricPrefixes in
+            if debugMetricPrefixes == nil {
+                if let defaults = UserDefaults(suiteName: kCloudMetricsPreferenceDomain) {
+                    let prefixes = defaults.stringArray(forKey: "DebugMetricPrefixes") ?? []
+                    debugMetricPrefixes = prefixes
+                    return prefixes
+                }
+            }
+            return debugMetricPrefixes ?? []
+        }
+    }
 
-private func debugMetric(metric: CloudMetric, message: String, value: String, client: String, logger: Logger) {
-    for debuggingPrefix in CloudMetrics.debugMetricPrefixArray() where metric.label.hasPrefix(debuggingPrefix) {
-        logger.info("""
+    private func debugMetric(metric: CloudMetric, message: String, value: String, client: String, logger: Logger) {
+        for debuggingPrefix in Self.debugMetricPrefixArray() where metric.label.hasPrefix(debuggingPrefix) {
+            logger.info("""
             \(message) \
             client: \(client), \
             label: \(metric.label), \
             dimensions: \(metric.dimensions), \
             value: \(value).
             """)
+        }
     }
 }

@@ -20,7 +20,7 @@ public protocol CloudBoardJobHelperAPIClientProtocol: CloudBoardJobHelperAPIClie
     func set(delegate: CloudBoardJobHelperAPIClientDelegateProtocol) async
 }
 
-public enum InvokeWorkloadRequest: Codable, Sendable, Hashable, CustomStringConvertible {
+public enum CloudBoardDaemonToJobHelperMessage: Codable, Sendable, Hashable, CustomStringConvertible {
     public typealias KeyID = Data
 
     case warmup(WarmupData)
@@ -121,9 +121,10 @@ public struct WarmupData: Codable, Sendable, Hashable, CustomStringConvertible {
     }
 }
 
-public protocol CloudBoardJobHelperAPIClientToServerProtocol: AnyActor, Sendable {
-    func invokeWorkloadRequest(_ request: InvokeWorkloadRequest) async throws
+public protocol CloudBoardJobHelperAPIClientToServerProtocol: Actor {
+    func invokeWorkloadRequest(_ request: CloudBoardDaemonToJobHelperMessage) async throws
     func teardown() async throws
+    func abandon() async throws
 }
 
 public protocol CloudBoardJobHelperAPIClientDelegateProtocol: AnyObject, Sendable,

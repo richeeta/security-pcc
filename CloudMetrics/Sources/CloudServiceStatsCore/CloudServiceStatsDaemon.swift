@@ -26,7 +26,7 @@ enum CloudServiceStatsDaemonError: Error {
 }
 
 class CloudServiceStatsDaemon {
-    static var logger: Logger = .init(
+    static let logger: Logger = .init(
         subsystem: "com.apple.cloudos.cloudservicestatsd",
         category: "cloudservicestatsd"
     )
@@ -38,7 +38,7 @@ class CloudServiceStatsDaemon {
     private let watchdogService: CloudServiceStatsWatchdogService
     
     public init() {
-        CloudMetrics.bootstrap(clientName: Self.processName)
+        CloudMetrics.bootstrap()
         watchdogService = CloudServiceStatsWatchdogService(processName: Self.processName, logger: Self.logger)
     }
 

@@ -12,5 +12,7 @@
 // EA1937
 // 10/02/2024
 
+import CloudMetricsCore
+
 @main
 extension CloudMetricsdCommand { }

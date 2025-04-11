@@ -22,7 +22,7 @@ public protocol CloudBoardJobAuthAPIServerProtocol: CloudBoardJobAuthAPIServerTo
     func connect() async
 }
 
-public protocol CloudBoardJobAuthAPIServerToClientProtocol: AnyActor, Sendable {
+public protocol CloudBoardJobAuthAPIServerToClientProtocol: Actor {
     func authKeysUpdated(newKeySet: AuthTokenKeySet) async throws
 }
 

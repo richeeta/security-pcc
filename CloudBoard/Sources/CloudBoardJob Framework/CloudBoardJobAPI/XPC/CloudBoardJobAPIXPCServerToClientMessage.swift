@@ -22,7 +22,7 @@ internal enum CloudBoardJobAPIXPCServerToClientMessage {
         internal typealias Success = ExplicitSuccess
         internal typealias Failure = CloudBoardJobAPIError
 
-        package let response: CloudBoardJobAPI.WorkloadResponse
+        package let response: CloudBoardJobAPI.CloudAppResponse
     }
 
     internal struct EndJob: CloudBoardAsyncXPCMessage {
@@ -31,7 +31,7 @@ internal enum CloudBoardJobAPIXPCServerToClientMessage {
     }
 }
 
-package enum WorkloadResponse: Codable, Sendable {
+package enum CloudAppResponse: Codable, Sendable {
     case findHelper(FindHelper)
     case sendHelperMessage(SendHelperMessage)
     case sendHelperEOF(SendHelperEOF)
@@ -39,7 +39,7 @@ package enum WorkloadResponse: Codable, Sendable {
 }
 
 package struct ResponseChunk: Codable, Sendable {
-    var data: Data
+    package var data: Data
 }
 
 package struct FindHelper: Codable, Sendable {

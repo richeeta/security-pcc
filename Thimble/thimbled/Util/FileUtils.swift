@@ -20,6 +20,7 @@
 //
 
 import Foundation
+import PrivateCloudCompute
 
 private let daemonName = "PrivateCloudCompute"
 package let blockingIOQueue = DispatchQueue(label: "com.apple.privatecloudcompute.blockingio", attributes: .concurrent)
@@ -52,23 +53,135 @@ func doThrowingBlockingIOWork<T>(onQueue queue: DispatchQueue = blockingIOQueue,
     }
 }
 
-func getDaemonDirectoryPath() -> URL {
+/// This function computes which directory our local state should be in.
+/// - Parameter dataContainerUrl: An optional location, from the sandbox, that gives the location of our data container
+/// - Returns: A tuple; the first element is where we should store our local data, and the second location is optionally a location where the local store used to be, so we can migrate.
+func getDaemonDirectoryPath(dataContainerUrl: URL? = nil) -> (URL, migrateFrom: URL?) {
+    let logger = tc2Logger(forCategory: .daemon)
     let fileManager = FileManager.default
 
-    // Get the ~/Library/ folder
-    let libDir: URL
-    do {
-        libDir = try fileManager.url(for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-    } catch {
-        fatalError("Could not get Library path for user error=\(error)")
+    // PLEASE NOTE
+    // The daemon is not containerized. That means that the FileManager APIs do not do
+    // the transparent work of putting our $HOME, etc (`.libraryDirectory` below) into
+    // the data container. Instead, we deal directly with the data container and the
+    // actual user $HOME; they appear differently and we can address both.
+    //
+    // As a result, what we're doing is as follows: if we are given a dataContainerUrl,
+    // then we use it as the "daemon directory." And in that case, we also return the
+    // actual $HOME-based directory, because someone might like to migrate some data
+    // from one to the other in a transition.
+    //
+    // If, however, we are not given a dataContainerUrl, then we just happily operate
+    // in $HOME like we did before.
+    //
+    // IMPORTANT: If the daemon becomes containerized in the future, this logic also
+    // must change.
+
+    let actualLibDir: URL
+    let migrateFromLibDir: URL?
+    if let dataContainerUrl {
+        actualLibDir = dataContainerUrl.appending(path: "Library", directoryHint: .isDirectory)
+        do {
+            migrateFromLibDir = try fileManager.url(for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        } catch {
+            fatalError("Could not get Library path for user error=\(error)")
+        }
+    } else {
+        do {
+            actualLibDir = try fileManager.url(for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        } catch {
+            fatalError("Could not get Library path for user error=\(error)")
+        }
+        migrateFromLibDir = nil
     }
 
-    let daemonDir = URL(fileURLWithPath: libDir.path, isDirectory: true).appendingPathComponent(daemonName, isDirectory: true)
-    do {
-        try fileManager.createDirectory(at: daemonDir, withIntermediateDirectories: true)
-    } catch {
-        fatalError("Failure to create directory at \(daemonDir) error=\(error) ")
+    func appendingPCC(libDir: URL) -> URL {
+        let result = URL(fileURLWithPath: libDir.path, isDirectory: true).appendingPathComponent(daemonName, isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: result, withIntermediateDirectories: true)
+        } catch {
+            fatalError("Failure to create directory at \(result) error=\(error) ")
+        }
+        return result
     }
 
-    return daemonDir
+    let daemonDir = appendingPCC(libDir: actualLibDir)
+    let migrateFrom = migrateFromLibDir.map(appendingPCC(libDir:))
+    logger.debug("daemonDir=\(daemonDir)")
+    logger.debug("migrateFrom=\(migrateFrom?.absoluteString ?? "")")
+
+    return (daemonDir, migrateFrom: migrateFrom)
+}
+
+/// Move an individual file for the purpose of migration
+func moveDaemonStateFile(from source: URL, to destination: URL) {
+    let logger = tc2Logger(forCategory: .daemon)
+    let fileManager = FileManager.default
+
+    logger.debug("migrating file source=\(source) destination=\(destination)")
+    do {
+        try fileManager.moveItem(at: source, to: destination)
+    } catch {
+        logger.error("migration failed error=\(error)")
+    }
+}
+
+/// Move all the known files in a migration, and try to delete the source directory.
+func migrateDaemon(from source: URL, to destination: URL) {
+    let logger = tc2Logger(forCategory: .daemon)
+    let fileManager = FileManager.default
+
+    let destinationContents: [URL]
+    do {
+        destinationContents = try fileManager.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil)
+    } catch {
+        logger.error("failed destination migration check error=\(error)")
+        return
+    }
+
+    guard destinationContents.isEmpty else {
+        // If there are already files in the destination directory, do not attempt a migration
+        logger.debug("skipping migration due to destinationContents=\(destinationContents)")
+        return
+    }
+
+    let sourceContents: [URL]
+    do {
+        sourceContents = try fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+    } catch {
+        logger.error("failed source migration check error=\(error)")
+        sourceContents = []
+    }
+
+    guard !sourceContents.isEmpty else {
+        // If there are no files in the source directory, do not attempt a migration
+        logger.debug("skipping migration due to sourceContents=\(sourceContents)")
+        return
+    }
+
+    // Immediately write something to prevent the migration from happening multiple times
+    let migrationSemaphoreFile = destination.appendingPathComponent(".migration")
+    do {
+        // This is so that we can easily write/read migration metadata later if we want (it's an empty json).
+        let data = "{}\n".data(using: .utf8)!
+        try data.write(to: migrationSemaphoreFile)
+        logger.debug("wrote migrationSemaphoreFile=\(migrationSemaphoreFile)")
+    } catch {
+        logger.error("failed to write migrationSemaphoreFile=\(migrationSemaphoreFile), error=\(error)")
+    }
+
+    // Allow each owner to migrate their own stuff; failure here is ignored.
+    NodeDistributionAnalyzerStoreHelper.migrate(from: source, to: destination)
+    RateLimiter.migrate(from: source, to: destination)
+    TC2ServerDrivenConfiguration.migrate(from: source, to: destination)
+    TC2RequestParametersLRUCache.migrate(from: source, to: destination)
+    TC2AttestationStore.migrate(from: source, to: destination)
+
+    // Remove the source dir (if possible)
+    do {
+        try fileManager.removeItem(at: source)
+        logger.debug("deleted migration source=\(source)")
+    } catch {
+        logger.error("unable to delete migration source error=\(error)")
+    }
 }

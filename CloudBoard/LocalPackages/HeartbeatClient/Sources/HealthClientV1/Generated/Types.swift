@@ -209,6 +209,8 @@ package enum Components {
         }
         /// - Remark: Generated from `#/components/schemas/NodeOperationalStatus`.
         @frozen package enum NodeOperationalStatus: String, Codable, Hashable, Sendable {
+            case UNKNOWN = "UNKNOWN"
+            case FUNCTIONAL = "FUNCTIONAL"
             case UNINITIALIZED = "UNINITIALIZED"
             case INITIALIZING = "INITIALIZING"
             case WAITING_FOR_FIRST_ATTESTATION_FETCH = "WAITING_FOR_FIRST_ATTESTATION_FETCH"
@@ -221,6 +223,7 @@ package enum Components {
             case SERVICE_DISCOVERY_PUBLISHER_DRAINING = "SERVICE_DISCOVERY_PUBLISHER_DRAINING"
             case DAEMON_DRAINED = "DAEMON_DRAINED"
             case DAEMON_EXITING_ON_ERROR = "DAEMON_EXITING_ON_ERROR"
+            case HEARTBEAT_TIMEOUT = "HEARTBEAT_TIMEOUT"
         }
         /// - Remark: Generated from `#/components/schemas/PayloadMetadata`.
         package struct PayloadMetadata: Codable, Hashable, Sendable {
@@ -236,8 +239,26 @@ package enum Components {
             package var configVersion: Swift.String?
             /// - Remark: Generated from `#/components/schemas/PayloadMetadata/workloadEnabled`.
             package var workloadEnabled: Swift.Bool?
-            /// - Remark: Generated from `#/components/schemas/PayloadMetadata/cryptexes`.
-            package var cryptexes: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/PayloadMetadata/additionalProperties`.
+            package struct additionalPropertiesPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                package var additionalProperties: [String: Swift.String]
+                /// Creates a new `additionalPropertiesPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                package init(additionalProperties: [String: Swift.String] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                package init(from decoder: any Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                package func encode(to encoder: any Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PayloadMetadata/additionalProperties`.
+            package var additionalProperties: Components.Schemas.PayloadMetadata.additionalPropertiesPayload?
             /// Creates a new `PayloadMetadata`.
             ///
             /// - Parameters:
@@ -247,7 +268,7 @@ package enum Components {
             ///   - serverOSBuildVersion:
             ///   - configVersion:
             ///   - workloadEnabled:
-            ///   - cryptexes:
+            ///   - additionalProperties:
             package init(
                 cloudOSReleaseType: Swift.String? = nil,
                 cloudOSBuilderVersion: Swift.String? = nil,
@@ -255,7 +276,7 @@ package enum Components {
                 serverOSBuildVersion: Swift.String? = nil,
                 configVersion: Swift.String? = nil,
                 workloadEnabled: Swift.Bool? = nil,
-                cryptexes: [Swift.String]? = nil
+                additionalProperties: Components.Schemas.PayloadMetadata.additionalPropertiesPayload? = nil
             ) {
                 self.cloudOSReleaseType = cloudOSReleaseType
                 self.cloudOSBuilderVersion = cloudOSBuilderVersion
@@ -263,7 +284,7 @@ package enum Components {
                 self.serverOSBuildVersion = serverOSBuildVersion
                 self.configVersion = configVersion
                 self.workloadEnabled = workloadEnabled
-                self.cryptexes = cryptexes
+                self.additionalProperties = additionalProperties
             }
             package enum CodingKeys: String, CodingKey {
                 case cloudOSReleaseType
@@ -272,7 +293,7 @@ package enum Components {
                 case serverOSBuildVersion
                 case configVersion
                 case workloadEnabled
-                case cryptexes
+                case additionalProperties
             }
         }
         /// - Remark: Generated from `#/components/schemas/State`.

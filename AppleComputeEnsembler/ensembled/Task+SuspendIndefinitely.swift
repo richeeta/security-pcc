@@ -15,16 +15,16 @@
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
 extension Task where Success == Never, Failure == Never {
-    /// Suspends the calling task indefinitely.
-    ///
-    /// `suspendIndefinitely()` is a swift-concurrency-safe alternative to
-    /// `dispatchMain()`.
-    ///
-    /// `suspendIndefinitely()` is implemented by creating an unsafe continuation
-    /// and never calling `UnsafeContinuation.resume()`. This results in the
-    /// calling async context awaiting forever.
-    public static func suspendIndefinitely() async {
-        // Explicit `return` required for properly inferring T == Void.
-        return await withUnsafeContinuation { _ in }
-    }
+	/// Suspends the calling task indefinitely.
+	///
+	/// `suspendIndefinitely()` is a swift-concurrency-safe alternative to
+	/// `dispatchMain()`.
+	///
+	/// `suspendIndefinitely()` is implemented by creating an unsafe continuation
+	/// and never calling `UnsafeContinuation.resume()`. This results in the
+	/// calling async context awaiting forever.
+	public static func suspendIndefinitely() async {
+		// Explicit `return` required for properly inferring T == Void.
+		return await withUnsafeContinuation { _ in }
+	}
 }

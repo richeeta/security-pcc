@@ -15,7 +15,11 @@
 //  Copyright © 2024 Apple, Inc. All rights reserved.
 //
 
+#if UTILITY
+let commandName = "pccutil"
+#else
 let commandName = "pccvre"
+#endif
 let applicationName = "com.apple.security-research.\(commandName)"
 
 @main

@@ -24,12 +24,17 @@ import Foundation_Private.NSBackgroundActivityScheduler
 import OSLog
 import PrivateCloudCompute
 
-final class NodeDistributionAnalyzerReportActivity: Sendable, TC2Schedulable {
-    let logger = tc2Logger(forCategory: .MetricReporter)
+final class NodeDistributionAnalyzerReportActivity<
+    SystemInfo: SystemInfoProtocol
+>: Sendable, TC2Schedulable {
+    let logger = tc2Logger(forCategory: .metricReporter)
     let eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation
-    let nodeDistributionAnalyzer: NodeDistributionAnalyzer
+    let nodeDistributionAnalyzer: NodeDistributionAnalyzer<SystemInfo>
 
-    init(eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation, nodeDistributionAnalyzer: NodeDistributionAnalyzer) {
+    init(
+        eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation,
+        nodeDistributionAnalyzer: NodeDistributionAnalyzer<SystemInfo>
+    ) {
         self.eventStreamContinuation = eventStreamContinuation
         self.nodeDistributionAnalyzer = nodeDistributionAnalyzer
     }

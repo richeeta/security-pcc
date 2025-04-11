@@ -22,18 +22,26 @@ import OSPrivate_os_log
 import System
 
 struct CLI: AsyncParsableCommand {
+    static var baseCommands: [any ParsableCommand.Type] = [
+        LicenseCmd.self,
+        ReleaseCmd.self,
+        TransparencyLogCmd.self,
+    ]
+    static var otherCommands: [any ParsableCommand.Type] = [
+        InstanceCmd.self,
+        Image4Cmd.self,
+        CryptexCmd.self,
+        AttestationCmd.self,
+    ]
+    #if UTILITY
+        static let subcommands = baseCommands
+    #else
+        static let subcommands = baseCommands + otherCommands
+    #endif
     static var configuration = CommandConfiguration(
         commandName: commandName,
         abstract: "Private Cloud Compute Virtual Research Environment tool.",
-        subcommands: [
-            LicenseCmd.self,
-            ReleaseCmd.self,
-            InstanceCmd.self,
-            Image4Cmd.self,
-            CryptexCmd.self,
-            TransparencyLogCmd.self,
-            AttestationCmd.self,
-        ]
+        subcommands: subcommands
     )
 
     // commandDir returns directory containing this executable (or ".")
@@ -89,6 +97,11 @@ struct CLI: AsyncParsableCommand {
 
             previous_hook?(level, msg)
         }
+    }
+
+    // warning writes msg with warning prefix to stderr
+    static func warning(_ msg: String) {
+        fputs("Warning: \(msg)\n", stderr)
     }
 
     static func parseURL(_ arg: String) throws -> URL {
@@ -349,7 +362,7 @@ struct CLI: AsyncParsableCommand {
             toolsDMGPath = FileManager.fileURL(dmgFile)
         } else {
             // if no tools DMG patch explicitly provided, look for HOST_TOOLS release asset
-            guard let toolsAsset = vre.config.lookupAssetType(type: .hostTools) else {
+            guard let toolsAsset = vre.config.lookupAssetType(.hostTools) else {
                 throw CLIError("no Host Tools DMG available (and no release asset found)")
             }
 
@@ -360,9 +373,7 @@ struct CLI: AsyncParsableCommand {
             throw CLIError("\(toolsDMGPath): file not found")
         }
 
-        CLI.logger.debug("mountPCHostTools: \(toolsDMGPath, privacy: .public)")
-
-        var toolsDMGs: [DMGHelper] = []
+        var toolsDMGs: [CryptexHelper] = []
         // callback to tidy up mounts/temp dirs
         let unmountCallback = {
             for var dmg in toolsDMGs {
@@ -486,19 +497,26 @@ enum CLIDefaults {
         return .production
     }
 
+    static var customAssetFolder: Bool = false // true if using "alternate" (user) ASSETS_DIR envvar
     static var assetsDirectory: URL {
         if let assetsDirEnv = ProcessInfo().environment["\(envPrefix)_ASSETS_DIR"] {
+            customAssetFolder = true
             return FileManager.fileURL(assetsDirEnv)
         }
 
-        
-        if let assetDir = try? FileManager.tempDirectory(subPath: applicationName, "assets") {
-            return assetDir
-        } else {
-            return URL.applicationSupportDirectory
-                .appendingPathComponent(applicationName)
-                .appendingPathComponent("assets")
+        return URL.cachesDirectory.appendingPathComponent(applicationName).appendingPathComponent("assets")
+    }
+
+    static var cdnHostnameOverride: String? {
+        guard let hostname = ProcessInfo().environment["\(envPrefix)_CDN_HOSTNAME_OVERRIDE"] else {
+            return nil
         }
+
+        guard hostname.wholeMatch(of: /^[A-Za-z0-9.-]+$/) != nil else {
+            return nil
+        }
+
+        return hostname
     }
 }
 

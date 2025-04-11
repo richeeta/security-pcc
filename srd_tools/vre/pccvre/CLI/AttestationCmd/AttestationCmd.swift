@@ -31,7 +31,8 @@ extension CLI {
             abstract: "Operations over PCC Attestation Bundles.",
             subcommands: [
                 ParseCmd.self,
-                VerifyCmd.self
+                VerifyCmd.self,
+                CanonicalizeCmd.self
             ]
         )
 

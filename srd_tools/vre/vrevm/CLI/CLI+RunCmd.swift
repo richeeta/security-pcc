@@ -67,8 +67,7 @@ extension CLI {
             }
 
             try vm.run(dfuMode: dfuMode, quietMode: quietMode)
-            let (stream, _) = AsyncStream<Void>.makeStream()
-            for try await _ in stream {} // park until interrupted
+            await CLI.awaitInterrupt(vm: vm)
         }
     }
 }

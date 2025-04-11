@@ -26,7 +26,7 @@ import PrivateCloudCompute
 extension TC2Daemon {
     func prefetchCache() async -> [String] {
         guard let attestationStore = self.attestationStore else {
-            logger.log("\(#function): store unavailable")
+            logger.log("attestation store unavailable")
             return []
         }
 
@@ -69,7 +69,7 @@ extension TC2Daemon {
 
     func prefetchCacheReset() async -> Bool {
         guard let attestationStore = self.attestationStore else {
-            logger.log("\(#function): store unavailable")
+            logger.log("attestation store unavailable")
             return false
         }
         await attestationStore.deleteAllAttestationStoreEntries()

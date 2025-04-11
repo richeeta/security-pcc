@@ -56,6 +56,7 @@ extension CloudAttestation.CloudAttestationError: CloudBoardLogging.ReportableEr
         case .attestError(let error): "attestError(\(String(reportable: error)))"
         case .validateError(let error): "validateError(\(String(reportable: error)))"
         case .invalidNonce: "invalidNonce"
+        case .expired(expiration: let expiration): "expired(\(expiration))"
         @unknown default: "unknown"
         }
         return "cloudAttestation.\(errorType)"
@@ -67,6 +68,13 @@ extension CloudAttestation.NodeAttestor.Error: CloudBoardLogging.ReportableError
         let errorType = switch self {
         case .dcikCreationFailure: "dcikCreationFailure"
         case .malformedSecureConfig: "malformedSecureConfig"
+        case .emptyCertificateChain: "emptyCertificateChain"
+        case .missingCryptexes: "missingCryptexes"
+        case .missingSecureConfig: "missingSecureConfig"
+        case .unexpectedCryptexPDI: "unexpectedCryptexPDI"
+        case .pendingTransparencyExpiry(
+            proofsExpiration: let proofsExpiration, keyExpiration: let keyExpiration
+        ): "pendingTransparencyExpiry(proofsExpiration: \(proofsExpiration), keyExpiration: \(keyExpiration))"
         @unknown default: "unknown"
         }
         return "nodeAttestor.\(errorType)"
@@ -83,6 +91,11 @@ extension CloudAttestation.TransparencyLogError: CloudBoardLogging.ReportableErr
         case .notFound: "notFound"
         case .invalidProof: "invalidProof"
         case .insertFailed: "insertFailed"
+        case .unknownStatus: "unknownStatus"
+        case .unrecognized(status: let status): "unrecognized(status: \(status))"
+        case .unknown(error: let error): "unknown(\(String(reportable: error)))"
+        case .clientError(error: let error): "clientError(\(String(reportable: error)))"
+        case .expired: "expired"
         @unknown default: "unknown"
         }
         return "cloudAttestation.transparencyLog.\(errorType)"

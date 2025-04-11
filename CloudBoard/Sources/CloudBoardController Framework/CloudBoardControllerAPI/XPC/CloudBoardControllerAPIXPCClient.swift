@@ -55,16 +55,6 @@ public actor CloudBoardControllerAPIXPCClient {
 
 extension CloudBoardControllerAPIXPCClient:
 CloudBoardControllerAPIClientToServerProtocol {
-    public func startAcceptingRequests() async throws {
-        try await self.connection?
-            .send(CloudBoardControllerAPIXPCClientToServerMessage.StartAcceptingRequests())
-    }
-
-    public func stopAcceptingRequests() async throws {
-        try await self.connection?
-            .send(CloudBoardControllerAPIXPCClientToServerMessage.StopAcceptingRequests())
-    }
-
     public func registerWorkload(config: WorkloadConfig, properties: WorkloadProperties) async throws {
         try await self.connection?
             .send(CloudBoardControllerAPIXPCClientToServerMessage.RegisterWorkload(
@@ -77,6 +67,11 @@ CloudBoardControllerAPIClientToServerProtocol {
             .send(CloudBoardControllerAPIXPCClientToServerMessage.UpdateHealthStatus(
                 status: status
             ))
+    }
+
+    public func restartPrewarmedInstances() async throws {
+        try await self.connection?
+            .send(CloudBoardControllerAPIXPCClientToServerMessage.RestartPrewarmedInstances())
     }
 }
 

@@ -23,7 +23,7 @@ import Foundation
 @_spi(NWActivity) @_spi(OHTTP) import Network
 import OSLog
 import PrivateCloudCompute
-import Synchronization
+import os
 
 /// A protocol for a type that can write to an underlying `NWConnection`.
 ///
@@ -127,7 +127,7 @@ package protocol NWAsyncConnectionFactoryProtocol: Sendable {
         endpoint: NWEndpoint,
         activity: NWActivity?,
         on queue: DispatchQueue,
-        requestID: UUID?,
+        requestID: UUID,
         _ body: (Inbound, Outbound, OHTTPSubStreamFactory) async throws -> Result
     ) async throws -> Result
 }
@@ -163,7 +163,7 @@ package struct NWAsyncConnection: NWAsyncConnectionFactoryProtocol {
     static func wrapping<Result>(
         connection: NWConnection,
         on queue: DispatchQueue,
-        requestID: UUID?,
+        requestID: UUID,
         _ body: (Inbound, Outbound, OHTTPStreamFactory) async throws -> Result
     ) async throws -> Result {
         let readyEvent = TC2Event<Void>()
@@ -183,21 +183,17 @@ package struct NWAsyncConnection: NWAsyncConnectionFactoryProtocol {
     private static func _wrapping<each Input, Result>(
         connection: NWConnection,
         on queue: DispatchQueue,
-        requestID: UUID?,
+        requestID: UUID,
         readyEvent: TC2Event<Void>?,
         inputs: repeat each Input,
         body: (Inbound, Outbound, repeat each Input) async throws -> Result
     ) async throws -> Result {
-        let logger = tc2Logger(forCategory: .Network)
-        logger.trace("Wrapping NWConnection")
-
+        let logger = tc2Logger(forCategory: .network)
         let connectionWrapper = NWConnectionWrapper(underlying: connection, readyEvent: readyEvent, logger: logger, requestID: requestID)
 
-        logger.debug("NWConnection starting")
-        connection.start(queue: queue)
+        connectionWrapper.start(queue: queue)
         defer {
-            logger.debug("NWConnection cancelling")
-            connection.cancel()
+            connectionWrapper.cancel()
         }
 
         let outbound = Outbound(connection: connectionWrapper)
@@ -221,7 +217,7 @@ package struct NWAsyncConnection: NWAsyncConnectionFactoryProtocol {
         endpoint: NWEndpoint,
         activity: NWActivity?,
         on queue: DispatchQueue,
-        requestID: UUID?,
+        requestID: UUID,
         _ body: (Inbound, Outbound, OHTTPStreamFactory) async throws -> Result
     ) async throws -> Result {
         let connection = NWConnection(
@@ -329,13 +325,13 @@ extension NWAsyncConnection {
             }
 
             package mutating func next() async throws -> Element? {
-                self.logger.trace("Waiting for data on NW connection")
+                self.logger.debug("Waiting for data on NW connection")
                 if self.isComplete {
                     // To be honest I am not clear what the NWConnection contract is, and
                     // whether you can expect receive to continue with a different context
                     // after an isComplete; so an obvious thing to do here is to terminate
                     // the iterator here but that may not be correct.
-                    self.logger.warning("Continuing iteration on NW connection that previously completed")
+                    self.logger.error("Continuing iteration on NW connection that previously completed")
                     return nil
                 }
                 let result = try await self.connection.next()
@@ -364,9 +360,9 @@ extension NWAsyncConnection {
         private let dispatchQueue: DispatchQueue
         private let rootConnection: NWConnection
         private let rootConnectionReadyEvent: TC2Event<Void>
-        private let requestID: UUID?
+        private let requestID: UUID
 
-        fileprivate init(rootConnection: NWConnection, rootConnectionReadyEvent: TC2Event<Void>, queue: DispatchQueue, requestID: UUID?) {
+        fileprivate init(rootConnection: NWConnection, rootConnectionReadyEvent: TC2Event<Void>, queue: DispatchQueue, requestID: UUID) {
             self.rootConnection = rootConnection
             self.rootConnectionReadyEvent = rootConnectionReadyEvent
             self.dispatchQueue = queue

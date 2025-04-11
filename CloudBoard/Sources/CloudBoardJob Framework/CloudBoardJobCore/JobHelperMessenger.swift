@@ -42,7 +42,6 @@ enum JobHelperMessengerError: Error {
     case waitForWarmupCalledAfterEndJob
     case parametersReceivedTwice
     case waitForParametersCalledAfterEndJob
-    case waitForParametersCalledWhenDisabled
     case provideOutputCalledAfterEndJob
     case endJobCalledMoreThanOnce
     case tornDownBeforeParametersReceived
@@ -66,7 +65,7 @@ actor JobHelperMessenger {
     private var metricsBuilder: CloudAppMetrics.Builder
     private var parametersReceived: Bool
     private var parametersPromise:
-        Promise<ParametersData, JobHelperMessengerError>?
+        Promise<ParametersData, JobHelperMessengerError> = Promise()
 
     private let server: CloudBoardJobAPIServerProtocol
 
@@ -76,8 +75,7 @@ actor JobHelperMessenger {
         teardownContinuation: JobHelperTeardownContinuation,
         log: os.Logger,
         appInstance: CloudBoardApp,
-        metricsBuilder: CloudAppMetrics.Builder,
-        waitForParametersEnabled: Bool
+        metricsBuilder: CloudAppMetrics.Builder
     ) async {
         self.inputContinuation = inputContinuation
         self.teardownContinuation = teardownContinuation
@@ -86,12 +84,6 @@ actor JobHelperMessenger {
         self.appInstance = appInstance
         self.metricsBuilder = metricsBuilder
         self.parametersReceived = false
-        if waitForParametersEnabled {
-            self.parametersPromise = Promise()
-        } else {
-            self.parametersPromise = nil
-        }
-
         await self.server.set(delegate: self)
         await self.server.connect()
     }
@@ -148,14 +140,9 @@ actor JobHelperMessenger {
         guard self.endCalled == false else {
             throw JobHelperMessengerError.waitForParametersCalledAfterEndJob
         }
-
-        guard let parametersPromise = self.parametersPromise else {
-            throw JobHelperMessengerError.waitForParametersCalledWhenDisabled
-        }
-
         Self.log.log("Waiting for parameters")
         defer { Self.log.log("Parameters received") }
-        return try await Future(parametersPromise).resultWithCancellation.get()
+        return try await Future(self.parametersPromise).resultWithCancellation.get()
     }
 
     func buildMetrics() -> CloudAppMetrics {
@@ -225,11 +212,7 @@ extension JobHelperMessenger: CloudBoardJobAPIClientToServerProtocol {
         }
         self.metricsBuilder.receivedParameters(parametersData)
         self.parametersReceived = true
-        if let parametersPromise = self.parametersPromise {
-            parametersPromise.succeed(with: parametersData)
-        } else {
-            self.log.info("Parameters data received when feature is disabled.")
-        }
+        self.parametersPromise.succeed(with: parametersData)
     }
 
     func provideInput(_ data: Data?, isFinal: Bool) async throws {
@@ -248,14 +231,11 @@ extension JobHelperMessenger: CloudBoardJobAPIClientToServerProtocol {
     }
 
     func cancel() {
-        if let promise = self.parametersPromise {
-            if self.parametersReceived == false {
-                promise.fail(
-                    with:
-                    JobHelperMessengerError.tornDownBeforeParametersReceived
-                )
-                self.parametersPromise = nil
-            }
+        if self.parametersReceived == false {
+            self.parametersPromise.fail(
+                with:
+                JobHelperMessengerError.tornDownBeforeParametersReceived
+            )
         }
     }
 

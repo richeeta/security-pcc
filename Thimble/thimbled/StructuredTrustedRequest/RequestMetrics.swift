@@ -27,11 +27,13 @@ import GenerativeFunctionsInstrumentation
 @_spi(HTTP) @_spi(NWActivity) import Network
 import OSLog
 import PrivateCloudCompute
+import Synchronization
 @preconcurrency import os
 
 final class RequestMetrics<
     Clock: _Concurrency.Clock,
-    AttestationStore: TC2AttestationStoreProtocol
+    AttestationStore: TC2AttestationStoreProtocol,
+    SystemInfo: SystemInfoProtocol
 >: Sendable where Clock.Duration == Duration {
     private struct State: Sendable {
         enum RopesRequestState: Sendable, CustomStringConvertible {
@@ -254,7 +256,7 @@ final class RequestMetrics<
         var verifiedAttestationsCount = 0
     }
 
-    private let state = os.OSAllocatedUnfairLock(initialState: State())
+    private let state = Mutex(State())
     private let clock: Clock
 
     private let clientRequestID: UUID
@@ -273,7 +275,7 @@ final class RequestMetrics<
     private let locale: String
 
     private let logger: Logger
-    private let lp: LogPrefix
+    private let logPrefix: String
     private let eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation
 
     private let signposter: OSSignposter
@@ -300,7 +302,8 @@ final class RequestMetrics<
         logger: Logger,
         eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation,
         clock: Clock,
-        store: AttestationStore?
+        store: AttestationStore?,
+        systemInfo: SystemInfo
     ) {
         self.clientRequestID = clientRequestID
         self.serverRequestID = serverRequestID
@@ -316,11 +319,11 @@ final class RequestMetrics<
         self.qos = qos
         self.parameters = parameters
 
-        self.clientInfo = tc2OSInfoWithDeviceModel
+        self.clientInfo = systemInfo.osInfoWithDeviceModel
         self.locale = Locale.current.identifier
 
         self.logger = logger
-        self.lp = LogPrefix(requestID: serverRequestID)
+        self.logPrefix = "\(serverRequestID):"
         self.eventStreamContinuation = eventStreamContinuation
         self.signposter = OSSignposter(logger: self.logger)
         self.signpostID = self.signposter.makeSignpostID()
@@ -328,7 +331,7 @@ final class RequestMetrics<
 
         if self.environment == TC2EnvironmentNames.production.rawValue {
             self.requestIDForEventReporting = UUID()
-            self.logger.log("\(self.lp) RequestIDForEventReporting: \(self.requestIDForEventReporting.uuidString)")
+            self.logger.log("\(self.logPrefix) RequestIDForEventReporting: \(self.requestIDForEventReporting)")
         } else {
             self.requestIDForEventReporting = self.serverRequestID
         }
@@ -342,6 +345,7 @@ final class RequestMetrics<
         let state = self.state.withLock { $0 }
 
         return .init(
+            clientRequestID: self.clientRequestID,
             serverRequestID: self.serverRequestID,
             environment: self.environment,
             creationDate: self.startDate,
@@ -616,7 +620,7 @@ final class RequestMetrics<
         if result.isSuccess {
             self.signposter.emitEvent("RopesInvokeRequestSent", id: self.signpostID)
         }
-        self.logger.log("\(self.lp) Ropes invoke request sent")
+        self.logger.log("\(self.logPrefix) Ropes invoke request sent")
         return try result.get()
     }
 
@@ -634,7 +638,7 @@ final class RequestMetrics<
 
         guard isResponseHead else { return }
 
-        self.logger.log("\(self.lp) Ropes invoke response head received")
+        self.logger.log("\(self.logPrefix) Ropes invoke response head received")
         self.signposter.emitEvent("RopesResponseHeadReceived", id: self.signpostID)
 
         var invokeResponseMetric = TC2InvokeResponseMetric(bundleID: self.bundleID)
@@ -716,7 +720,7 @@ final class RequestMetrics<
 
         if result.isSuccess {
             self.signposter.emitEvent("OTTSent", id: self.signpostID)
-            self.logger.log("\(self.lp) Sent auth message on data stream")
+            self.logger.log("\(self.logPrefix) Sent auth message on data stream")
         }
 
         return try result.get()
@@ -743,7 +747,7 @@ final class RequestMetrics<
             }
         }
         self.signposter.emitEvent("NodeSelected", id: self.signpostID)
-        self.logger.log("\(self.lp): nodeSelected received")
+        self.logger.log("\(self.logPrefix) nodeSelected received")
     }
 
     func receivedOutgoingUserDataChunk() {
@@ -869,7 +873,7 @@ final class RequestMetrics<
         return result.get()
     }
 
-    func attestationsReceived(_ attestations: [ValidatedAttestationOrAttestation]) {
+    func attestationsReceived(_ attestations: some (Collection<ValidatedAttestationOrAttestation> & Sendable)) {
         let duration = self.startInstant.duration(to: self.clock.now)
         let count = attestations.count
         let maybeAttestationActivity = self.state.withLock { state -> NWActivity? in
@@ -1101,7 +1105,7 @@ final class RequestMetrics<
 
         self.signposter.emitEvent("SentKeyToNode", id: self.signpostID)
         if firstKeySent {
-            self.logger.log("\(self.lp) First key sent to node.")
+            self.logger.log("\(self.logPrefix) First key sent to node.")
         }
     }
 
@@ -1273,15 +1277,15 @@ final class RequestMetrics<
         //    this is provided by CloudAttestation
 
         if !TransparencyReport().enabled {
-            self.logger.log("\(self.lp): Request Log: TransparencyReport is not enabled")
+            self.logger.log("\(self.logPrefix) Request Log: TransparencyReport is not enabled")
             return
         }
 
-        self.logger.log("\(self.lp): Request Log: logging request data for analysis")
-        self.logger.log("\(self.lp): Request Log: request parameters:")
-        self.logger.log("\(self.lp): Request Log: pipelineKind: \(self.parameters.pipelineKind)")
-        self.logger.log("\(self.lp): Request Log: pipelineArguments: \(self.parameters.pipelineArguments)")
-        self.logger.log("\(self.lp): Request Log: attestations: ")
+        self.logger.log("\(self.logPrefix) Request Log: logging request data for analysis")
+        self.logger.log("\(self.logPrefix) Request Log: request parameters:")
+        self.logger.log("\(self.logPrefix) Request Log: pipelineKind: \(self.parameters.pipelineKind)")
+        self.logger.log("\(self.logPrefix) Request Log: pipelineArguments: \(self.parameters.pipelineArguments)")
+        self.logger.log("\(self.logPrefix) Request Log: attestations: ")
         let nodes = self.state.withLock { state in state.nodes }
 
         // Load bundles from store
@@ -1313,12 +1317,12 @@ final class RequestMetrics<
                     .finished:
                     "Validated"
                 }
-            self.logger.log("\(self.lp): Request Log: Attestation: \(key) \(node.state) <\(validatedString) \(node.nodeID): \(attestationString)>")
+            self.logger.log("\(self.logPrefix) Request Log: Attestation: \(key) \(node.state) <\(validatedString) \(node.nodeID): \(attestationString)>")
 
             var biomeAttestation: PrivateCloudComputeRequestLog.Attestation = .init()
             biomeAttestation.node = node.nodeID
             biomeAttestation.nodeState = validatedString
-            biomeAttestation.attestationString = attestationString
+            biomeAttestation.attestationBundle = attestationString
             biomeAttestations.append(biomeAttestation)
         }
 
@@ -1341,8 +1345,9 @@ final class RequestMetrics<
                     $0.timestamp = Date()
                     $0.pipelineKind = self.parameters.pipelineKind
                     $0.pipelineParameters = workloadParametersAsString
-                    $0.attestations = biomeAttestations
-                })
+                    $0.nodes = biomeAttestations
+                }
+            )
         } catch {
             self.logger.error("failed to log Biome event: \(error)")
         }

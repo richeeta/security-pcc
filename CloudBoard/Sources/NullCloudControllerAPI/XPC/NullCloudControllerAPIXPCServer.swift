@@ -44,5 +44,13 @@ public actor NullCloudControllerAPIXPCServer {
             }
             return try await delegate.updateState(state: message.state)
         }
+
+        handlers.register(NullCloudControllerAPIXPCClientToServerMessages.RestartPrewarmedInstances.self) { _ in
+            guard let delegate = await self.delegate else {
+                throw NullCloudControllerAPIError.noDelegateSet
+            }
+            try await delegate.restartPrewarmedInstances()
+            return ExplicitSuccess()
+        }
     }
 }

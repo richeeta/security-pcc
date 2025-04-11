@@ -19,63 +19,38 @@
 //  Created by Andrea Guzzo on 8/24/22.
 //
 
+internal import CloudMetricsConstants
+internal import CloudMetricsXPC
 import Foundation
 import os
 
-internal class CloudMetricsCounterHandler: CounterHandler {
+internal final class CloudMetricsCounterHandler: CounterHandler, Sendable {
     private let counter: CloudMetricsCounter
-    private let logger: Logger
-    private weak var cloudMetrics: CloudMetricsFactory?
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsCounterHandler")
+    private let metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation
 
-    internal init(cloudMetrics: CloudMetricsFactory, counter: CloudMetricsCounter) {
+    internal init(metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation,
+                  counter: CloudMetricsCounter) {
         self.counter = counter
-        self.logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsCounterHandler")
-        self.cloudMetrics = cloudMetrics
+        self.metricUpdateContinuation = metricUpdateContinuation
     }
 
     internal func increment(by amount: Int64) {
         let counter = self.counter
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.incrementCounter(counter, by: amount, epoch: epoch)
-                } catch {
-                    logger.debug("Can't increment counter '\(counter.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.incrementCounter(.init(counter, by: amount, epoch: epoch)))
     }
 
     internal func reset() {
         let counter = self.counter
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.resetCounter(counter, epoch: epoch)
-                } catch {
-                    logger.debug("Can't reset counter '\(counter.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.resetCounter(.init(counter, epoch: epoch)))
     }
 
     internal func reset(value: Int64) {
         let counter = self.counter
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.resetCounter(counter, initialValue: value, epoch: epoch)
-                } catch {
-                    logger.debug("Can't reset counter with value'\(counter.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.resetCounterWithIntValue(.init(counter, value: value, epoch: epoch)) )
     }
 }
 
@@ -85,30 +60,12 @@ extension CloudMetricsCounterHandler: FloatingPointCounterHandler {
     internal func increment(by amount: Double) {
         let counter = self.counter
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.incrementCounter(counter, by: amount, epoch: epoch)
-                } catch {
-                    logger.debug("Can't increment counter '\(counter.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.incrementFloatingPointCounter(.init(counter, by: amount, epoch: epoch)))
     }
 
     internal func reset(value: Double) {
         let counter = self.counter
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.resetCounter(counter, initialValue: value, epoch: epoch)
-                } catch {
-                    logger.debug("Can't increment counter '\(counter.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.resetCounterWithDoubleValue(.init(counter, value: value, epoch: epoch)))
     }
 }

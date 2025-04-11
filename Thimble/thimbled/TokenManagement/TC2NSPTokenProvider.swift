@@ -42,7 +42,7 @@ enum PrivacyProxyError {
 
 @available(iOS 18, *)
 final class TC2NSPTokenProvider: TC2TokenProvider, Sendable {
-    let logger = tc2Logger(forCategory: .Daemon)
+    let logger = tc2Logger(forCategory: .daemon)
     let config: TC2Configuration
     init(config: TC2Configuration) {
         self.config = config

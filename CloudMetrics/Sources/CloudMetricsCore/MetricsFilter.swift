@@ -20,103 +20,96 @@
 //  Created by Andrea Guzzo on 10/24/23.
 //
 
+package import CloudMetricsXPC
 import Foundation
-import os
+internal import os
 #if canImport(SecureConfigDB)
-@_weakLinked import SecureConfigDB
+@_weakLinked private import SecureConfigDB
 #endif
 
-internal final class MetricsFilter {
+package final class MetricsFilter: Sendable {
     internal enum LogEventType {
         case onRecord
         case onPublish
     }
 
-    internal class FrequencyTracker {
-        private var lock: UnsafeMutablePointer<os_unfair_lock>
-        private var lastUpdated: [String: Date] = [:]
-        private var lastPublished: [String: Date] = [:]
-        private var loggedMetrics: [String: [LogEventType: ContinuousClock.Instant]] = [:]
-        private var logThrottleInterval: Int
+    internal final class FrequencyTracker: Sendable {
+        private struct State {
+            fileprivate var lastUpdated: [String: Date] = [:]
+            fileprivate var lastPublished: [String: Date] = [:]
+            fileprivate var loggedMetrics: [String: [LogEventType: ContinuousClock.Instant]] = [:]
+            fileprivate var logThrottleInterval: Duration
+        }
+        private let state: OSAllocatedUnfairLock<State>
         private let logger = Logger(subsystem: "MetricsFilter", category: "FrequencyTracker")
 
-        internal init(logThrottleInterval: Int) {
-            self.logThrottleInterval = logThrottleInterval
-            self.lock = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
-            self.lock.initialize(to: os_unfair_lock())
+        internal init(logThrottleInterval: Duration) {
+            self.state = .init(initialState: .init(logThrottleInterval: logThrottleInterval))
         }
 
         internal func lastUpdated(_ metricName: String) -> Date {
-            os_unfair_lock_lock(lock)
-            let lastUpdated = lastUpdated[metricName]
-            os_unfair_lock_unlock(lock)
+            let lastUpdated = self.state.withLock { $0.lastUpdated[metricName] }
             return lastUpdated ?? Date.distantPast
         }
 
         internal func lastPublished(_ metricName: String) -> Date {
-            os_unfair_lock_lock(lock)
-            let lastPublished = lastUpdated[metricName]
-            os_unfair_lock_unlock(lock)
+            let lastPublished = self.state.withLock { $0.lastPublished[metricName] }
             return lastPublished ?? Date.distantPast
         }
 
         internal func recordUpdate(_ metricName: String) {
-            os_unfair_lock_lock(lock)
-            lastUpdated[metricName] = Date.now
-            os_unfair_lock_unlock(lock)
+            self.state.withLock { state in state.lastUpdated[metricName] = Date.now }
         }
+
         internal func recordPublish(_ metricName: String) {
-            os_unfair_lock_lock(lock)
-            lastPublished[metricName] = Date.now
-            os_unfair_lock_unlock(lock)
+            self.state.withLock { state in state.lastPublished[metricName] = Date.now }
         }
 
         internal func shouldLog(_ metricName: String, _ logEvent: LogEventType) -> Bool {
-            os_unfair_lock_lock(lock)
-            var shouldLog = true
-            if let record = loggedMetrics[metricName] {
-                if let when = record[logEvent] {
-                    let duration: Duration = .seconds(logThrottleInterval)
-                    if when.duration(to: .now) < duration {
-                        shouldLog = false
+            self.state.withLock { state in
+                var shouldLog = true
+                if let record = state.loggedMetrics[metricName] {
+                    if let when = record[logEvent] {
+                        if when.duration(to: .now) < state.logThrottleInterval {
+                            shouldLog = false
+                        }
                     }
+                    if shouldLog {
+                        var updatedRecord = record
+                        updatedRecord[logEvent] = .now
+                        state.loggedMetrics[metricName] = updatedRecord
+                    }
+                } else {
+                    state.loggedMetrics[metricName] = [logEvent: .now]
                 }
-                if shouldLog {
-                    var updatedRecord = record
-                    updatedRecord[logEvent] = .now
-                    loggedMetrics[metricName] = updatedRecord
-                }
-            } else {
-                loggedMetrics[metricName] = [logEvent: .now]
+                return shouldLog
             }
-            os_unfair_lock_unlock(lock)
-            return shouldLog
         }
     }
 
     private typealias ClientName = String
     private typealias MetricName = String
 
-    private let allowList: [ClientName: [MetricName: CloudMetricsFilterRule]]
-    private let allMetricsByName: [String: [CloudMetricsFilterRule]]
+    private let allowList: [ClientName: [MetricName: Configuration.FilterRule]]
+    private let allMetricsByName: [String: [Configuration.FilterRule]]
     private let ignoreList: [ClientName: [MetricName]]
     private let allIgnoredMetrics: [MetricName]
     private let logger = Logger(subsystem: "MetricsFilter", category: "RuleChecker")
     private let globalDimensions: [String]
     private let disabled: Bool
-    private var frequencyTracker: FrequencyTracker
+    private let frequencyTracker: FrequencyTracker
 
-    internal init(configuration: CloudMetricsConfiguration, forceEnable: Bool = false) {
-        self.allowList = configuration.metricsAllowList.reduce(
-        into: [ClientName: [MetricName: CloudMetricsFilterRule]]()) { result, rule in
+    package init(configuration: Configuration, forceEnable: Bool = false) {
+        self.allowList = configuration.auditLists?.allowedMetrics.reduce(
+            into: [ClientName: [MetricName: Configuration.FilterRule]]()) { result, rule in
             if result[rule.client] != nil {
                 result[rule.client]?[rule.label] = rule
             } else {
                 result[rule.client] = [rule.label: rule]
             }
-        }
+            } ?? [:]
         self.allMetricsByName = allowList.values.reduce(
-            into: [String: [CloudMetricsFilterRule]]()) { result, rules in
+            into: [String: [Configuration.FilterRule]]()) { result, rules in
             for (_, rule) in rules {
                 if result[rule.label] != nil {
                     result[rule.label]?.append(rule)
@@ -126,7 +119,7 @@ internal final class MetricsFilter {
             }
         }
 
-        self.ignoreList = configuration.metricsIgnoreList
+        self.ignoreList = configuration.auditLists?.ignoredMetrics ?? [:]
         self.allIgnoredMetrics = ignoreList.values.flatMap { $0 }
 
         self.globalDimensions = configuration.globalLabels.keys.sorted()
@@ -160,10 +153,10 @@ internal final class MetricsFilter {
             enableFiltering = false
         }
         self.disabled = !enableFiltering
-        self.frequencyTracker = FrequencyTracker(logThrottleInterval: configuration.auditLogThrottleIntervalSeconds)
+        self.frequencyTracker = FrequencyTracker(logThrottleInterval: configuration.auditLogThrottleInterval)
     }
 
-    internal func shouldRecord(metric: CloudMetric, client: String) -> Bool {
+    package func shouldRecord(metric: CloudMetric, client: String) -> Bool {
         let metricName = metric.label
 
         if disabled {
@@ -189,7 +182,7 @@ internal final class MetricsFilter {
             return false
         }
 
-        if let type = rule.type, type != metric.type {
+        guard rule.type == metric.type || rule.type == .all else {
             if frequencyTracker.shouldLog(metricName, .onRecord) {
                 logger.error("""
                     Metric '\(metricName, privacy: .public)' of type '\(metric.type, privacy: .public)' \
@@ -223,7 +216,8 @@ internal final class MetricsFilter {
         }
 
         let lastUpdate = frequencyTracker.lastUpdated(metricName)
-        if rule.minUpdateInterval > 0, lastUpdate.timeIntervalSinceNow < rule.minUpdateInterval {
+        if rule.minUpdateInterval > .seconds(0),
+            lastUpdate.timeIntervalSinceNow < Double(rule.minUpdateInterval.components.seconds) {
             logger.error("""
                 Metric '\(metricName, privacy: .public) is updating too frequently. \
                 (lastUpdate=\(lastUpdate), now=\(Date.now)
@@ -237,7 +231,7 @@ internal final class MetricsFilter {
         return true
     }
 
-    internal func shouldPublish(metricName: String, destination: CloudMetricsDestination) -> Bool {
+    package func shouldPublish(metricName: String, destination: Configuration.Destination) -> Bool {
         if disabled {
             return true
         }
@@ -269,7 +263,8 @@ internal final class MetricsFilter {
             // (let's say coming from different clients) this will actually
             // apply the strictest interval among the all the matching rules
             let lastPublished = frequencyTracker.lastPublished(metricName)
-            if rule.minPublishInterval > 0, lastPublished.timeIntervalSinceNow < rule.minPublishInterval {
+            if rule.minPublishInterval > .seconds(0),
+               lastPublished.timeIntervalSinceNow < TimeInterval(rule.minPublishInterval.components.seconds) {
                 logger.error("""
                 Metric '\(metricName, privacy: .public) is publishing too frequently. \
                 (lastPublish=\(lastPublished), now=\(Date.now)
@@ -281,6 +276,3 @@ internal final class MetricsFilter {
         return true
     }
 }
-
-// Sendability is ensured by synchronising internally
-extension MetricsFilter: @unchecked Sendable {}

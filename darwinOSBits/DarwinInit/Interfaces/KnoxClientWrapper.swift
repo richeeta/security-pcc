@@ -64,6 +64,7 @@ enum KnoxClientWrapper {
             let mtlsAuth = mTLSAuth(urlCredential: credential)
             knoxClient = KnoxServiceClient(knoxMtlsAuth: mtlsAuth, SAKSmTLSAuth: mtlsAuth, delegate: KnoxClientDelegate() , knoxHostURL: knoxServerURL)
         }
+        // Override CDN host url to specified alternative instead of knox.cdn-apple.com
         if let altCDN {
             knoxClient.alternateCDNHost = altCDN
         }

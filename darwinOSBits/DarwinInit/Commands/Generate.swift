@@ -175,7 +175,7 @@ be passed to the darwinOS through boot-args. This allows the command \
             }
         }
 
-        let json = try config.jsonString(prettyPrinted: false)
+        let json = try config.jsonString(prettyPrinted: false, redactCredentialStrings: false)
         if fileName == "-" {
             print(json)
         } else {
@@ -250,9 +250,9 @@ extension Generate {
 					size: size[safe: index],
 					sha256: sha256[safe: index],
 					auth: auth[safe: index],
-					dawToken: dawToken[safe: index],
-					wgUsername: wgUsername[safe: index],
-					wgToken: wgToken[safe: index],
+                    dawToken: CredentialString(dawToken[safe: index]),
+                    wgUsername: wgUsername[safe: index],
+					wgToken: CredentialString(wgToken[safe: index]),
                     alternateCDNHost: alternateCDNHost[safe: index],
                     backgroundTrafficClass: backgroundTrafficClass,
                     networkRetryCount: networkRetryCount,

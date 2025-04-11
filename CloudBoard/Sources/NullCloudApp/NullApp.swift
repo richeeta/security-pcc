@@ -47,6 +47,11 @@ actor NullCloudApp: CloudBoardApp {
         }
     }
 
+    func teardown() throws {
+        Self.log.log("NullCloudApp teardown invoked, exiting")
+        exit(0)
+    }
+
     func run(input: InputData, responder: ResponseWriter, environment: CloudAppEnvironment) async throws {
         switch self.config?.nullAppRole {
         case .none, .some("echo"):
@@ -81,7 +86,7 @@ actor NullCloudApp: CloudBoardApp {
             self.metrics.emit(Metrics.LaunchCounter(action: .increment, serviceName: .unknown))
             let error = NullCloudAppUnknownAppError(role: self.config?.nullAppRole)
             Self.log.fault("""
-            requestId=\(environment.plaintextMetadata.requestID, privacy: .public)
+            request.uuid=\(environment.plaintextMetadata.requestID, privacy: .public)
             error=\(String(reportable: error))
             """)
             self.metrics.emit(Metrics.OverallErrorCounter.Factory(action: .increment).make(error))

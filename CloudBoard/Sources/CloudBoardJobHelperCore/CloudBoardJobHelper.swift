@@ -33,12 +33,16 @@ enum CloudBoardJobHelperError: Error {
 struct CloudBoardJobHelperHotProperties: Decodable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case _maxRequestMessageSize = "MaxRequestMessageSize"
+        case enforceTGTValidation = "EnforceTGTValidation"
     }
 
     private var _maxRequestMessageSize: Int?
+
     var maxRequestMessageSize: Int {
         self._maxRequestMessageSize ?? 1024 * 1024 * 4 // 4MB
     }
+
+    var enforceTGTValidation: Bool?
 }
 
 /// Per-request process implementing an end-to-end encrypted protocol with privatecloudcomputed on the client. It is
@@ -55,13 +59,16 @@ public actor CloudBoardJobHelper {
     let metrics: any MetricsSystem
     var requestID: String
     var jobUUID: UUID
+    var workloadProvider: CloudBoardJobHelperWorkloadProvider
+    var hotPropertiesProvider: CloudBoardJobHelperHotPropertiesProvider
+    var config: CBJobHelperConfiguration
 
     public static let logger: Logger = .init(
         subsystem: "com.apple.cloudos.cloudboard",
         category: "cb_jobhelper"
     )
 
-    public init() {
+    public init(configuration: CBJobHelperConfiguration) {
         self.server = CloudBoardJobHelperAPIXPCServer.localListener()
         self.attestationClient = nil
         self.jobAuthClient = nil
@@ -73,6 +80,11 @@ public actor CloudBoardJobHelper {
             Self.logger.warning("Could not get own job UUID, creating new UUID for app")
         }
         self.jobUUID = myUUID ?? UUID()
+
+        // Initialize providers
+        self.workloadProvider = LaunchdWorkloadProvider(metrics: self.metrics)
+        self.hotPropertiesProvider = PreferencesUpdatesProvider()
+        self.config = configuration
     }
 
     // For testing only
@@ -80,6 +92,8 @@ public actor CloudBoardJobHelper {
         server: CloudBoardJobHelperAPIServerProtocol,
         attestationClient: CloudBoardAttestationAPIClientProtocol,
         jobAuthClient: CloudBoardJobAuthAPIClientProtocol,
+        workloadProvider: CloudBoardJobHelperWorkloadProvider,
+        hotPropertiesProvider: CloudBoardJobHelperHotPropertiesProvider,
         metrics: any MetricsSystem
     ) {
         self.server = server
@@ -98,6 +112,10 @@ public actor CloudBoardJobHelper {
             message=\("Could not get own job UUID, creating new UUID for app")
             """)
         }
+
+        self.workloadProvider = workloadProvider
+        self.hotPropertiesProvider = hotPropertiesProvider
+        self.config = CBJobHelperConfiguration()
 
         /// Workaround to prevent Swift compiler from ignoring all conformances defined in Logging+ReportableError
         /// rdar://126351696 (Swift compiler seems to ignore protocol conformances not used in the same target)
@@ -131,23 +149,14 @@ public actor CloudBoardJobHelper {
         }
         self.emitLaunchMetrics()
 
-        let preferencesUpdates = PreferencesUpdates(
-            preferencesDomain: "com.apple.cloudos.hotproperties.cb_jobhelper",
-            maximumUpdateDuration: .seconds(1),
-            forType: CloudBoardJobHelperHotProperties.self
-        )
-
-        // force unwrap is safe as we will either get the preferences or throw an error
-        let preferences = try await preferencesUpdates.first(where: { _ in true })!.applyingPreferences { $0 }
-
-        let config = try CBJobHelperConfiguration.fromPreferences()
+        let preferences = try await self.hotPropertiesProvider.getPreferences()
+        let maxRequestMsgSize = preferences.maxRequestMessageSize
+        let enforceTGTValidation = preferences.enforceTGTValidation ?? self.config.enforceTGTValidation
 
         // Create streams for communication between the different cb_jobhelper components
         let (wrappedRequestStream, wrappedRequestContinuation) = AsyncStream<PipelinePayload<Data>>.makeStream()
         let (wrappedResponseStream, wrappedResponseContinuation) = AsyncStream<FinalizableChunk<Data>>.makeStream()
         let (cloudAppRequestStream, cloudAppRequestContinuation) = AsyncStream<PipelinePayload<Data>>.makeStream()
-        let (cloudAppResponseStream, cloudAppResponseContinuation) = AsyncThrowingStream<CloudAppResponse, Error>
-            .makeStream()
 
         // Fetch signing keys for TGT and OTT signature verification and register for updates
         let jobAuthClient: CloudBoardJobAuthAPIClientProtocol = if self.jobAuthClient != nil {
@@ -164,7 +173,7 @@ public actor CloudBoardJobHelper {
                 tgtPublicSigningKeys: jobAuthClient.requestTGTSigningKeys()
             )
         } catch {
-            if config.enforceTGTValidation {
+            if enforceTGTValidation {
                 CloudboardJobHelperCheckpoint(
                     logMetadata: self.logMetadata(),
                     message: "Could not load signing keys from cb_jobauthd. Failing.",
@@ -193,26 +202,24 @@ public actor CloudBoardJobHelper {
         let jobAuthClientDelegate = JobAuthClientDelegate(tgtValidator: tgtValidator)
         await jobAuthClient.set(delegate: jobAuthClientDelegate)
 
+        let workload = try self.workloadProvider.getCloudAppWorkload(
+            cloudAppNameOverride: self.config.cloudAppName,
+            jobUUID: self.jobUUID,
+            cbJobHelperLogMetadata: CloudBoardJobHelperLogMetadata(
+                jobID: self.jobUUID,
+                requestTrackingID: self.requestID
+            )
+        )
+
         let workloadJobManager = WorkloadJobManager(
             tgtValidator: tgtValidator,
-            enforceTGTValidation: config.enforceTGTValidation,
+            enforceTGTValidation: enforceTGTValidation,
             requestStream: wrappedRequestStream,
             maxRequestMessageSize: preferences.maxRequestMessageSize,
             responseContinuation: wrappedResponseContinuation,
             cloudAppRequestContinuation: cloudAppRequestContinuation,
-            cloudAppResponseStream: cloudAppResponseStream,
-            cloudAppResponseContinuation: cloudAppResponseContinuation,
+            workload: workload,
             metrics: self.metrics,
-            jobUUID: self.jobUUID
-        )
-
-        let cloudAppResponseDelegate = CloudAppResponseDelegate(
-            responseContinuation: cloudAppResponseContinuation
-        )
-
-        let workload = try getCloudAppWorkload(
-            cloudAppNameOverride: config.cloudAppName,
-            delegate: cloudAppResponseDelegate,
             jobUUID: self.jobUUID
         )
 
@@ -289,7 +296,14 @@ public actor CloudBoardJobHelper {
                                         message: "Forwarding end of input signal to workload",
                                         operationName: "cloudAppRequestStream"
                                     ).log(to: Self.logger, level: .info)
-                                    try await workload.endOfInput()
+                                    try await workload.endOfInput(error: nil)
+                                case .abandon:
+                                    await CloudboardJobHelperCheckpoint(
+                                        logMetadata: self.logMetadata(withRemotePID: workload.remotePID),
+                                        message: "Abandon requested, tearing down workload",
+                                        operationName: "cloudAppRequestStream"
+                                    ).log(to: Self.logger, level: .info)
+                                    try await workload.abandon()
                                 case .teardown:
                                     await CloudboardJobHelperCheckpoint(
                                         logMetadata: self.logMetadata(withRemotePID: workload.remotePID),
@@ -312,7 +326,9 @@ public actor CloudBoardJobHelper {
                                 message: "Request stream finished",
                                 operationName: "cloudAppRequestStream"
                             ).log(to: Self.logger, level: .default)
-                            try await workload.provideInput(nil, isFinal: true)
+                            if await workload.abandoned == false {
+                                try await workload.provideInput(nil, isFinal: true)
+                            }
                         }
 
                         try await group.waitForAll()
@@ -336,7 +352,10 @@ public actor CloudBoardJobHelper {
                 }
             }
         } catch {
-            self.metrics.emit(Metrics.Daemon.ErrorExitCounter(action: .increment))
+            self.metrics.emit(Metrics.Daemon.ErrorExitCounter(
+                action: .increment,
+                dimensions: [.errorDescription: String(reportable: error)]
+            ))
             CloudboardJobHelperCheckpoint(logMetadata: self.logMetadata(), message: "Finished", error: error)
                 .log(to: Self.logger, level: .error)
         }
@@ -375,9 +394,8 @@ public actor CloudBoardJobHelper {
 
     func getCloudAppWorkload(
         cloudAppNameOverride: String?,
-        delegate: CloudBoardJobAPIClientDelegateProtocol,
         jobUUID: UUID
-    ) throws -> CloudBoardJobHelperWorkload {
+    ) throws -> CloudAppWorkloadProtocol {
         var job: ManagedLaunchdJob?
         let managedJobs = LaunchdJobHelper.fetchManagedLaunchdJobs(
             type: CloudBoardJobType.cloudBoardApp,
@@ -425,60 +443,14 @@ public actor CloudBoardJobHelper {
             fatalError("No cloud app found")
         }
 
-        let workload = try CloudBoardAppWorkload(
+        let workload = try CloudAppWorkload(
             managedJob: job,
             machServiceName: job.jobAttributes.initMachServiceName,
             log: Self.logger,
-            delegate: delegate,
             metrics: self.metrics,
             jobUUID: jobUUID
-        ) as CloudBoardAppWorkload
+        )
         return workload
-    }
-}
-
-// Delegate to handle output from the workload
-private actor CloudAppResponseDelegate: CloudBoardJobAPIClientDelegateProtocol {
-    public static let logger: Logger = .init(
-        subsystem: "com.apple.cloudos.cloudboard",
-        category: "cb_jobhelper.CloudAppResponseDelegate"
-    )
-    let responseContinuation: AsyncThrowingStream<CloudAppResponse, any Error>.Continuation
-    init(responseContinuation: AsyncThrowingStream<CloudAppResponse, any Error>.Continuation) {
-        self.responseContinuation = responseContinuation
-    }
-
-    func cloudBoardJobAPIClientSurpriseDisconnect() async {
-        Self.logger.log("CloudAppResponseDelegate surpriseDisconnect")
-        self.responseContinuation.finish()
-    }
-
-    func provideResponseChunk(_ data: Data) async throws {
-        self.responseContinuation.yield(.chunk(data))
-    }
-
-    func endJob() async throws {
-        // Might be called multiple times (see CloudBoardAppWorkload : monitoringCompleted)
-        self.responseContinuation.finish()
-    }
-
-    func findHelper(helperID _: UUID) async throws {
-        Self.logger.log("CloudAppResponseDelegate findHelper()")
-        fatalError("Unimplemented")
-    }
-
-    func sendHelperMessage(helperID _: UUID, data _: Data) async throws {
-        Self.logger.log("CloudAppResponseDelegate sendHelperMessage()")
-        fatalError("Unimplemented")
-    }
-
-    func sendHelperEOF(helperID _: UUID) async throws {
-        Self.logger.log("CloudAppResponseDelegate sendHelperEOF()")
-        fatalError("Unimplemented")
-    }
-
-    func cloudBoardJobAPIClientAppTerminated(statusCode: Int?) async {
-        self.responseContinuation.yield(.appTermination(.init(statusCode: statusCode)))
     }
 }
 
@@ -505,7 +477,7 @@ struct CloudBoardJobHelperLogMetadata: CustomStringConvertible {
             text.append("jobId=\(jobID) ")
         }
         if let requestTrackingID = self.requestTrackingID, requestTrackingID != "" {
-            text.append("requestId=\(requestTrackingID) ")
+            text.append("request.uuid=\(requestTrackingID) ")
         }
         if let remotePID = self.remotePID {
             text.append("remotePid=\(remotePID) ")
@@ -566,5 +538,25 @@ private actor JobAuthClientDelegate: CloudBoardJobAuthAPIClientDelegateProtocol 
     func authKeysUpdated(newKeySet: AuthTokenKeySet) async throws {
         CloudBoardJobHelper.logger.log("Received new set of signing keys from cb_jobauthd")
         self.tgtValidator.setSigningKeys(newKeySet)
+    }
+}
+
+protocol CloudBoardJobHelperHotPropertiesProvider {
+    func getPreferences() async throws -> CloudBoardJobHelperHotProperties
+}
+
+struct PreferencesUpdatesProvider: CloudBoardJobHelperHotPropertiesProvider {
+    let preferencesUpdates: PreferencesUpdates<CloudBoardJobHelperHotProperties>
+
+    init() {
+        self.preferencesUpdates = PreferencesUpdates<CloudBoardJobHelperHotProperties>(
+            preferencesDomain: "com.apple.cloudos.hotproperties.cb_jobhelper",
+            maximumUpdateDuration: .seconds(1)
+        )
+    }
+
+    func getPreferences() async throws -> CloudBoardJobHelperHotProperties {
+        // force unwrap is safe as we will either get the preferences or throw an error
+        return try await self.preferencesUpdates.first(where: { _ in true })!.applyingPreferences { $0 }
     }
 }

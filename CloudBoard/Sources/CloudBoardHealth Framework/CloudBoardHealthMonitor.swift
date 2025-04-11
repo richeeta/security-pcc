@@ -14,7 +14,7 @@
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
-import CloudBoardCommon
+internal import CloudBoardCommon
 import os
 
 public actor CloudBoardHealthMonitor {

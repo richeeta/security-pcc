@@ -22,12 +22,11 @@ private let defaultLogger: Logger = .init(
     category: "CloudBoardMetrics"
 )
 
-public struct OperationMetrics {
+public struct OperationMetrics: Sendable {
     let metricsSystem: MetricsSystem
-
-    let totalFactory: (() -> (any Counter))?
-    let successFactory: (() -> (any Counter))?
-    let cancellationFactory: (() -> (any Counter))?
+    let totalFactory: (@Sendable () -> (any Counter))?
+    let successFactory: (@Sendable () -> (any Counter))?
+    let cancellationFactory: (@Sendable () -> (any Counter))?
     let errorFactory: (any CounterFactory<any Error>)?
     let durationFactory: (any HistogramFactory<ContinuousClock.Duration>)?
 
@@ -39,8 +38,9 @@ public struct OperationMetrics {
         errorFactory: (any CounterFactory<any Error>)? = nil,
         durationFactory: (any HistogramFactory<ContinuousClock.Duration>)? = nil
     ) {
-        let successFactory: (() -> (any Counter))? = if let success { { success } } else { nil }
-        let cancellationFactory: (() -> (any Counter))? = if let cancellation { { cancellation } } else { nil }
+        let successFactory: (@Sendable () -> (any Counter))? = if let success { { success } } else { nil }
+        let cancellationFactory: (@Sendable () -> (any Counter))? =
+            if let cancellation { { cancellation } } else { nil }
         self.init(
             metricsSystem: metricsSystem,
             successFactory: successFactory,
@@ -52,9 +52,9 @@ public struct OperationMetrics {
 
     public init(
         metricsSystem: MetricsSystem,
-        totalFactory: (() -> (any Counter))? = nil,
-        successFactory: (() -> (any Counter))? = nil,
-        cancellationFactory: (() -> (any Counter))? = nil,
+        totalFactory: (@Sendable () -> (any Counter))? = nil,
+        successFactory: (@Sendable () -> (any Counter))? = nil,
+        cancellationFactory: (@Sendable () -> (any Counter))? = nil,
         errorFactory: (any CounterFactory<any Error>)? = nil,
         durationFactory: (any HistogramFactory<ContinuousClock.Duration>)? = nil
     ) {
@@ -89,7 +89,7 @@ struct ContinuousTimeMeasurement {
 extension ThrowingTaskGroup {
     public mutating func addTaskWithLogging(
         operation: String,
-        diagnosticKeys: some CustomStringConvertible,
+        diagnosticKeys: some CustomStringConvertible & Sendable,
         sensitiveError: Bool = true,
         metrics: OperationMetrics,
         logger: Logger? = nil,

@@ -20,8 +20,8 @@
 //
 
 import Foundation
-import os
 import JobQuiescence
+import os
 
 public class JobQuiescenceMonitor {
 	public static let logger = Logger(subsystem: kEnsemblerPrefix, category: "JobQuiescenceMonitor")
@@ -45,14 +45,16 @@ public class JobQuiescenceMonitor {
 		if self.quiesceCount == 1 {
 			Self.logger.log("Received quiesce notification #\(self.quiesceCount): Quiescing")
 
-			guard let ensembler = ensembler else {
+			guard let ensembler else {
 				Self.logger.error("Oops: no ensembler to quiesce. This should never happen!")
 				return
 			}
 
 			let conn = JQXPCConnection()
-			let task = JQTask(conn: conn,
-							  description: JQTaskDescriptor(name: "AppleComputeEnsemblerDraining"))
+			let task = JQTask(
+				conn: conn,
+				description: JQTaskDescriptor(name: "AppleComputeEnsemblerDraining")
+			)
 			var doTaskEnd = true
 			do {
 				try task.begin()

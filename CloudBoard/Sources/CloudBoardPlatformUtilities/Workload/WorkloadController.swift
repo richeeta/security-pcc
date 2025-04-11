@@ -21,11 +21,14 @@ import CloudBoardMetrics
 import os
 
 public enum WorkloadControllerError: Error, Equatable, CustomStringConvertible {
+    case controllerError(message: String)
     case controllerUnknownState
     case controllerDisconnected
 
     public var description: String {
         switch self {
+        case .controllerError(let message):
+            return "Controller reported error: \(message)"
         case .controllerUnknownState:
             return "Controller reported unknown state"
         case .controllerDisconnected:
@@ -35,17 +38,25 @@ public enum WorkloadControllerError: Error, Equatable, CustomStringConvertible {
 }
 
 public actor WorkloadController {
+    internal static let debounceDuration: Duration = .seconds(5)
+
     private var state: ControllerState
     private let healthPublisher: ServiceHealthMonitor
     private var server: CloudBoardControllerAPIXPCServer?
     private var serviceDiscoveryPublisher: ServiceDiscoveryPublisherProtocol?
     private var providerPause: (() async throws -> Void)?
+    private var restartPrewarmedInstances: (() async throws -> Void)?
+    private var restartingPrewarmedInstances: Bool = false
     private var concurrentRequestCount: Int
     private var announcedService: Bool = false
     private var metrics: MetricsSystem
+    private var isLeader: Bool = true
 
     private var workloadProperties: WorkloadProperties?
     private var workloadConfig: WorkloadConfig?
+
+    private var scheduledPublishing: Task<Void, Never>?
+    private var lastDebouncedPublishingTime: ContinuousClock.Instant?
 
     public enum ControllerState: Equatable, CustomStringConvertible {
         case initializing
@@ -65,8 +76,15 @@ public actor WorkloadController {
             case .busy:
                 return "Busy"
             case .error(let error):
-                return "Error: \(String(describing: error))"
+                if let error {
+                    return "Error: \(String(describing: error))"
+                }
+                return "Error"
             }
+        }
+
+        var needDebouncing: Bool {
+            self == .ready
         }
     }
 
@@ -96,10 +114,16 @@ public actor WorkloadController {
     public func run(
         serviceDiscoveryPublisher: ServiceDiscoveryPublisherProtocol?,
         concurrentRequestCountStream: AsyncStream<Int>,
-        providerPause: @escaping () async throws -> Void
+        providerPause: @escaping () async throws -> Void,
+        restartPrewarmedInstances: (() async throws -> Void)?
     ) async throws {
+        defer {
+            self.scheduledPublishing?.cancel()
+        }
+        self.isLeader = true
         self.serviceDiscoveryPublisher = serviceDiscoveryPublisher
         self.providerPause = providerPause
+        self.restartPrewarmedInstances = restartPrewarmedInstances
         self.server = CloudBoardControllerAPIXPCServer.localListener()
         Self.log.info("Starting WorkloadController server")
         await self.server?.connect(listenerDelegate: self, serverDelegate: self)
@@ -109,15 +133,11 @@ public actor WorkloadController {
         // using real controller then announce the config immediately.
         if case .ready = self.state,
            let properties = self.workloadProperties,
-           let config = self.workloadConfig {
+           self.workloadConfig != nil {
             Self.log.info("""
             Announcing test service \(properties.workloadName, privacy: .public)
             """)
-            self.sendHealthPublisherUpdate()
-            self.serviceDiscoveryPublisher?.announceService(
-                name: properties.workloadName,
-                workloadConfig: config.routingTags
-            )
+            self.sendStatusUpdate()
         }
 
         try await self.concurrentRequestCountMonitor(
@@ -127,6 +147,7 @@ public actor WorkloadController {
 
     // on follower nodes we dont need service discovery
     public func runInFollowerMode() async throws {
+        self.isLeader = false
         Self.log.info("Starting WorkloadController server")
         self.server = CloudBoardControllerAPIXPCServer.localListener()
         await self.server?.connect(listenerDelegate: self, serverDelegate: self)
@@ -150,7 +171,7 @@ public actor WorkloadController {
             if self.announcedService == false {
                 self.serviceDiscoveryPublisher?.announceService(
                     name: properties.workloadName,
-                    workloadConfig: config.routingTags
+                    workloadConfig: config.workloadTags
                 )
                 self.announcedService = true
             }
@@ -168,6 +189,14 @@ public actor WorkloadController {
     }
 
     private func sendHealthPublisherUpdate() {
+        if self.isLeader {
+            self.sendHealthPublisherUpdateLeader()
+        } else {
+            self.sendHealthPublisherUpdateFollower()
+        }
+    }
+
+    private func sendHealthPublisherUpdateLeader() {
         if case .error = self.state {
             self.healthPublisher.updateStatus(.unhealthy)
             return
@@ -199,11 +228,22 @@ public actor WorkloadController {
         }
         self.healthPublisher.updateStatus(.healthy(.init(
             workloadType: properties.workloadName,
-            tags: config.routingTags,
+            tags: config.workloadTags,
             maxBatchSize: maxBatchSize,
             currentBatchSize: config.currentBatchSize,
             optimalBatchSize: optimalBatchSize
         )))
+    }
+
+    private func sendHealthPublisherUpdateFollower() {
+        switch self.state {
+        case .initializing:
+            return
+        case .ready, .busy, .busyTransitioning:
+            self.healthPublisher.updateStatus(.healthy(nil))
+        case .error:
+            self.healthPublisher.updateStatus(.unhealthy)
+        }
     }
 
     public func shutdown() async throws {
@@ -241,8 +281,7 @@ extension WorkloadController: CloudBoardControllerAPIServerDelegateProtocol {
         self.workloadProperties = properties
         self.announcedService = false
 
-        self.sendServiceDiscoveryUpdate()
-        self.sendHealthPublisherUpdate()
+        self.sendStatusUpdate()
     }
 
     public func updateHealthStatus(
@@ -258,9 +297,16 @@ extension WorkloadController: CloudBoardControllerAPIServerDelegateProtocol {
         case .initializing:
             self.state = .initializing
         case .ready:
+            guard self.restartingPrewarmedInstances == false else {
+                Self.log.error("""
+                Cannot transition to \(status.state, privacy: .public) while restart of \
+                prewarmed instances is in progress
+                """)
+                throw CloudBoardControllerAPIError.restartPrewarmedInProgress
+            }
             self.state = .ready
         case .busy:
-            if case .busyTransitioning = self.state {
+            guard self.state != .busyTransitioning else {
                 throw CloudBoardControllerAPIError.alreadyTransitioning(.busy)
             }
             self.state = .busyTransitioning
@@ -270,15 +316,25 @@ extension WorkloadController: CloudBoardControllerAPIServerDelegateProtocol {
             self.state = .error(.controllerUnknownState)
         }
 
+        if self.isLeader, case .busyTransitioning = self.state {
+            guard self.providerPause != nil else {
+                Self.log.error("""
+                Unable to transition to '\(status.state, privacy: .public)' because no \
+                providerPause handler is configured
+                """)
+                self.state = oldWorkloadState
+                throw CloudBoardControllerAPIError.unavailable
+            }
+        }
+
         if oldWorkloadState != self.state {
             self.metrics.emit(Metrics.WorkloadStatus.HealthStatus(value: 0, healthStatus: oldWorkloadState))
             self.metrics.emit(Metrics.WorkloadStatus.HealthStatus(value: 1, healthStatus: self.state))
         }
 
-        self.sendServiceDiscoveryUpdate()
-        self.sendHealthPublisherUpdate()
+        self.sendOrDebounceStatusUpdate()
 
-        if case .busyTransitioning = self.state {
+        if self.isLeader, case .busyTransitioning = self.state {
             do {
                 try await self.providerPause!()
             } catch {
@@ -289,6 +345,84 @@ extension WorkloadController: CloudBoardControllerAPIServerDelegateProtocol {
             self.state = .busy
             self.metrics.emit(Metrics.WorkloadStatus.HealthStatus(value: 0, healthStatus: .busyTransitioning))
             self.metrics.emit(Metrics.WorkloadStatus.HealthStatus(value: 1, healthStatus: .busy))
+        }
+    }
+
+    private func sendOrDebounceStatusUpdate() {
+        if self.state.needDebouncing {
+            if self.scheduledPublishing != nil {
+                return
+            }
+            let delay = if let lastDebouncedPublishingTime = self.lastDebouncedPublishingTime {
+                Self.debounceDuration - lastDebouncedPublishingTime.duration(to: .now)
+            } else {
+                Duration.zero
+            }
+            if delay <= Duration.zero {
+                self.sendStatusUpdate()
+                return
+            }
+            self.scheduledPublishing = Task {
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    Self.log.debug("Scheduled status update publishing cancelled")
+                    self.scheduledPublishing = nil
+                    return
+                }
+                self.sendStatusUpdate()
+            }
+        } else {
+            self.sendStatusUpdate()
+        }
+    }
+
+    private func sendStatusUpdate() {
+        self.scheduledPublishing?.cancel()
+        self.scheduledPublishing = nil
+        self.sendServiceDiscoveryUpdate()
+        self.sendHealthPublisherUpdate()
+        if self.state.needDebouncing {
+            self.lastDebouncedPublishingTime = .now
+        }
+    }
+
+    public func restartPrewarmedInstances() async throws {
+        Self.log.log("""
+        Received 'RestartPrewarmedInstances' from CloudBoardController
+        """)
+
+        guard let handler = self.restartPrewarmedInstances else {
+            Self.log.error("""
+            No underlying handler configured for 'RestartPrewarmedInstances'
+            """)
+            throw CloudBoardControllerAPIError.unavailable
+        }
+
+        guard self.restartingPrewarmedInstances == false else {
+            Self.log.error("Restart of prewarmed instances already in progress")
+            throw CloudBoardControllerAPIError.restartPrewarmedInProgress
+        }
+
+        guard self.state == .busy else {
+            Self.log.error(
+                "Cannot restart prewarmed instances in state \(self.state, privacy: .public)"
+            )
+            throw CloudBoardControllerAPIError.restartPrewarmedInvalidState(
+                WorkloadControllerState(from: self.state)
+            )
+        }
+        self.restartingPrewarmedInstances = true
+        defer {
+            self.restartingPrewarmedInstances = false
+        }
+        do {
+            try await handler()
+        } catch {
+            Self.log.error(
+                "Error while restarting prewarmed instances: \(error, privacy: .public)"
+            )
+            throw CloudBoardControllerAPIError.restartPrewarmedFailed
         }
     }
 }
@@ -307,5 +441,23 @@ extension WorkloadController: CloudBoardAsyncXPCListenerDelegate {
 
         self.sendServiceDiscoveryUpdate()
         self.sendHealthPublisherUpdate()
+    }
+}
+
+extension WorkloadControllerState {
+    public init(from controllerState: WorkloadController.ControllerState) {
+        switch controllerState {
+        case .initializing:
+            self = .initializing
+        case .ready:
+            self = .ready
+        case .busy, .busyTransitioning:
+            self = .busy
+        case .error(let error):
+            if case .controllerError(let message) = error {
+                self = .error(message: message)
+            }
+            self = .error(message: nil)
+        }
     }
 }

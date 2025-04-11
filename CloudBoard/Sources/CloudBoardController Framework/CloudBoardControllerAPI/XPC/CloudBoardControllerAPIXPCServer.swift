@@ -82,5 +82,13 @@ extension CloudBoardControllerAPIXPCServer: CloudBoardControllerAPIServerProtoco
             try await delegate.registerWorkload(config: message.config, properties: message.properties)
             return ExplicitSuccess()
         }
+
+        handlers.register(CloudBoardControllerAPIXPCClientToServerMessage.RestartPrewarmedInstances.self) { _ in
+            guard let delegate = await self.delegate else {
+                preconditionFailure("Received RestartPrewarmedInstances message with no delegate set")
+            }
+            try await delegate.restartPrewarmedInstances()
+            return ExplicitSuccess()
+        }
     }
 }

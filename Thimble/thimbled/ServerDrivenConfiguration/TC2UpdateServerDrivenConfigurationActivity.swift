@@ -24,13 +24,17 @@ import Foundation_Private.NSBackgroundActivityScheduler
 import OSLog
 import PrivateCloudCompute
 
-final class TC2UpdateServerDrivenConfigurationActivity: Sendable, TC2Schedulable {
-    private let logger = tc2Logger(forCategory: .UpdateServerDrivenConfiguration)
+final class TC2UpdateServerDrivenConfigurationActivity<
+    SystemInfo: SystemInfoProtocol
+>: Sendable, TC2Schedulable {
+    private let logger = tc2Logger(forCategory: .updateServerDrivenConfiguration)
     private let serverDrivenConfig: TC2ServerDrivenConfiguration
+    private let systemInfo: SystemInfo
     private let config: TC2Configuration
 
-    package init(serverDrivenConfig: TC2ServerDrivenConfiguration, config: TC2Configuration) {
+    package init(serverDrivenConfig: TC2ServerDrivenConfiguration, systemInfo: SystemInfo, config: TC2Configuration) {
         self.serverDrivenConfig = serverDrivenConfig
+        self.systemInfo = systemInfo
         self.config = config
     }
 
@@ -42,6 +46,7 @@ final class TC2UpdateServerDrivenConfigurationActivity: Sendable, TC2Schedulable
 
         let request = TC2UpdateServerDrivenConfigurationRequest(
             serverDrivenConfiguration: self.serverDrivenConfig,
+            systemInfo: systemInfo,
             requestID: UUID(),
             config: self.config
         )

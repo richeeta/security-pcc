@@ -19,47 +19,31 @@
 //  Created by Andrea Guzzo on 8/29/22.
 //
 
+internal import CloudMetricsConstants
+internal import CloudMetricsXPC
 import Foundation
 import os
 
-internal class CloudMetricsRecorderHandler: RecorderHandler {
+internal final class CloudMetricsRecorderHandler: RecorderHandler, Sendable {
     private let recorder: CloudMetricsRecorder
-    private let logger: Logger
-    private weak var cloudMetrics: CloudMetricsFactory?
+    private let logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsRecorderHandler")
+    private let metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation
 
-    internal init(cloudMetrics: CloudMetricsFactory, recorder: CloudMetricsRecorder) {
+    internal init(metricUpdateContinuation: AsyncStream<CloudMetricsServiceMessages>.Continuation,
+                  recorder: CloudMetricsRecorder) {
         self.recorder = recorder
-        self.logger = Logger(subsystem: kCloudMetricsLoggingSubsystem, category: "CloudMetricsRecorderHandler")
-        self.cloudMetrics = cloudMetrics
+        self.metricUpdateContinuation = metricUpdateContinuation
     }
 
     internal func record(_ value: Int64) {
         let recorder = self.recorder
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordInteger(recorder: recorder, value: value, epoch: epoch)
-                } catch {
-                    logger.debug("Can't record integer for '\(recorder.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordInteger(.init(recorder, value: value, epoch: epoch)))
     }
 
     internal func record(_ value: Double) {
         let recorder = self.recorder
         let epoch = Date().timeIntervalSince1970
-        let logger = self.logger
-        if let cloudMetrics = cloudMetrics {
-            cloudMetrics.clientStreamContinuation.yield {
-                do {
-                    try await cloudMetrics.client()?.recordDouble(recorder: recorder, value: value, epoch: epoch)
-                } catch {
-                    logger.debug("Can't record double for '\(recorder.label, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-        }
+        metricUpdateContinuation.yield(.recordDouble(.init(recorder, value: value, epoch: epoch)))
     }
 }

@@ -145,13 +145,6 @@ struct CloudAttestationProvider: AttestationProvider {
             return try FakeAttestationBundle.data(for: publicKey, kem: .Curve25519_HKDF_SHA256)
         }
 
-        guard #_hasSymbol(NodeAttestor.self) else {
-            Self.logger.fault(
-                "CloudAttestation.framework unavailable. Unable to generate CloudAttestation attestation bundle."
-            )
-            throw CloudAttestationProviderError.cloudAttestationUnavailable
-        }
-
         let attestor: NodeAttestor
         if self.configuration.cloudAttestation.includeTransparencyLogInclusionProof {
             Self.logger.log("CloudAttestation transparency proof inclusion enabled")

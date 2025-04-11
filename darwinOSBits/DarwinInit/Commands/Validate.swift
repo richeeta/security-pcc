@@ -41,7 +41,7 @@ struct Validate: AsyncParsableCommand {
 
     func run() async throws {
         let loadedConfig = try await DInitConfigLoader.load(from: source)
-        let prettyJson = try loadedConfig.config.jsonString()
+        let prettyJson = try loadedConfig.config.jsonString(redactCredentialStrings: false)
         if let policyString = loadedConfig.config.configSecurityPolicy {
             print("Validating config under \(policyString) policy: \(prettyJson)")
             try Apply.validateConfig(policyString: policyString, config: loadedConfig.config)

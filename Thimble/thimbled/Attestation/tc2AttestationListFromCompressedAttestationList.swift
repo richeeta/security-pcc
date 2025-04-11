@@ -73,13 +73,13 @@ func tc2CompressedAttestationListFromAttestationList(_ list: Proto_Ropes_Common_
             return Data(bytes: dst, count: size)
         }
 
-        return .with { list in
-            list.compressedBytes = compressed
-            list.compressionAlgorithm = .brotli
-            list.uncompressedLengthHint = UInt32(serialized.count)
+        return .with {
+            $0.compressedBytes = compressed
+            $0.compressionAlgorithm = .brotli
+            $0.uncompressedLengthHint = UInt32(serialized.count)
         }
     } catch {
         logger.error("Failed to serialize: \(error)")
-        return Proto_Ropes_Common_CompressedAttestationList()
+        return .init()
     }
 }

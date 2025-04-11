@@ -21,7 +21,6 @@
 
 import AtomicsInternal
 @_spi(HTTP) @_spi(OHTTP) import Network
-import OSAnalytics
 import PrivateCloudCompute
 import os
 
@@ -54,6 +53,7 @@ final class TrustedRequest<
     AttestationStore: TC2AttestationStoreProtocol,
     AttestationVerifier: TC2AttestationVerifier,
     RateLimiter: RateLimiterProtocol,
+    SystemInfo: SystemInfoProtocol,
     TokenProvider: TC2TokenProvider,
     Clock: _Concurrency.Clock
 >: Sendable where Clock.Duration == Duration {
@@ -68,18 +68,19 @@ final class TrustedRequest<
     let attestationStore: AttestationStore?
     let attestationVerifier: AttestationVerifier
     let rateLimiter: RateLimiter
+    let systemInfo: SystemInfo
     let tokenProvider: TokenProvider
     let clock: Clock
     let jsonEncoder = tc2JSONEncoder()
 
     let eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation
-    let requestMetrics: RequestMetrics<Clock, AttestationStore>
+    let requestMetrics: RequestMetrics<Clock, AttestationStore, SystemInfo>
 
     // The request body's OHTTP context
     private let requestOHTTPContext: UInt64 = 1
 
-    private let logger = tc2Logger(forCategory: .TrustedRequest)
-    private let lp: LogPrefix
+    private let logger = tc2Logger(forCategory: .trustedRequest)
+    private let logPrefix: String
 
     init(
         clientRequestID: UUID,
@@ -92,13 +93,14 @@ final class TrustedRequest<
         attestationStore: AttestationStore?,
         attestationVerifier: AttestationVerifier,
         rateLimiter: RateLimiter,
+        systemInfo: SystemInfo,
         tokenProvider: TokenProvider,
         clock: Clock,
         eventStreamContinuation: AsyncStream<ThimbledEvent>.Continuation
     ) {
         self.clientRequestID = clientRequestID
         self.serverRequestID = serverRequestID
-        self.lp = LogPrefix(requestID: serverRequestID)
+        self.logPrefix = "\(serverRequestID):"
 
         self.configuration = configuration
         self.parameters = parameters
@@ -109,6 +111,7 @@ final class TrustedRequest<
         self.attestationStore = attestationStore
         self.attestationVerifier = attestationVerifier
         self.rateLimiter = rateLimiter
+        self.systemInfo = systemInfo
         self.tokenProvider = tokenProvider
         self.clock = clock
         self.eventStreamContinuation = eventStreamContinuation
@@ -125,13 +128,14 @@ final class TrustedRequest<
             logger: self.logger,
             eventStreamContinuation: eventStreamContinuation,
             clock: clock,
-            store: self.attestationStore
+            store: self.attestationStore,
+            systemInfo: self.systemInfo
         )
     }
 
     func run() async throws {
         self.logger.debug("Running TrustedRequest")
-        self.logger.debug("\(self.lp): Configuration: \(self.configuration)")
+        self.logger.debug("\(self.logPrefix) Configuration: \(self.configuration)")
 
         try await PowerAssertion.withPowerAssertion(name: "TC2TrustedRequest") {
             do {
@@ -141,7 +145,7 @@ final class TrustedRequest<
             } catch {
                 // wrapping the internal error as TrustedCloudComputeError for reporting and for throwing to our clients
                 let trustedCloudComputeError = TrustedCloudComputeError.wrapAny(error: error)
-                self.logger.error("\(self.lp): sendRopesRequest trustedCloudComputeError: \(trustedCloudComputeError) from raw error: \(error)")
+                self.logger.error("\(self.logPrefix) sendRopesRequest trustedCloudComputeError: \(trustedCloudComputeError) from raw error: \(error)")
                 self.incomingUserDataReader.finish(error: trustedCloudComputeError)
                 self.outgoingUserDataWriter.cancelAllWrites(error: trustedCloudComputeError)
                 await self.requestMetrics.requestFinished(error: trustedCloudComputeError)
@@ -166,6 +170,7 @@ final class TrustedRequest<
             parameters: .makeTLSAndHTTPParameters(
                 ignoreCertificateErrors: self.configuration.ignoreCertificateErrors,
                 forceOHTTP: self.configuration.forceOHTTP,
+                useCompression: true,
                 bundleIdentifier: self.configuration.bundleID
             ),
             endpoint: .url(self.configuration.endpointURL),
@@ -280,7 +285,7 @@ final class TrustedRequest<
                 while let nextResult = await taskGroup.next() {
                     switch nextResult {
                     case .ropesRequestDidFinish(.success):
-                        self.logger.log("\(self.lp) Ropes request finished successfully")
+                        self.logger.log("\(self.logPrefix) Ropes request finished successfully")
                     // We MUST NOT cancel the taskGroup here! Background:
                     //
                     // `ropesRequestDidFinish` means that we received the trailers from ROPES,
@@ -294,21 +299,21 @@ final class TrustedRequest<
                     // finished).
 
                     case .ropesRequestDidFinish(.failure(let failure)):
-                        self.logger.log("\(self.lp) Ropes request failed. Error: \(failure)")
-                        self.logger.debug("\(self.lp) Cancelling main task group")
+                        self.logger.log("\(self.logPrefix) Ropes request failed. Error: \(failure)")
+                        self.logger.debug("\(self.logPrefix) Cancelling main task group")
                         taskGroup.cancelAll()
                         ropesError = failure
 
                     case .dataSubStreamDidFinished(.success):
-                        self.logger.log("\(self.lp) Data substream task finished successfully")
+                        self.logger.log("\(self.logPrefix) Data substream task finished successfully")
                         break
 
                     case .dataSubStreamDidFinished(.failure(let failure)):
-                        self.logger.log("\(self.lp) Data substream task failed. Error: \(failure)")
+                        self.logger.log("\(self.logPrefix) Data substream task failed. Error: \(failure)")
                         dataStreamError = failure
 
                     case .nodeSubStreamsDidFinished(.success):
-                        self.logger.log("\(self.lp) Node substreams task finished successfully")
+                        self.logger.log("\(self.logPrefix) Node substreams task finished successfully")
                         break
 
                     case .nodeSubStreamsDidFinished(.failure(let failure)):
@@ -319,11 +324,11 @@ final class TrustedRequest<
                             // we can make!
                             taskGroup.cancelAll()
                         }
-                        self.logger.log("\(self.lp) Node substreams task failed. error: \(failure)")
+                        self.logger.log("\(self.logPrefix) Node substreams task failed. error: \(failure)")
                         nodeStreamsError = failure
 
                     case .connectionMetricsReportingFinished:
-                        self.logger.log("\(self.lp) Connection metrics reporting finished")
+                        self.logger.log("\(self.logPrefix) Connection metrics reporting finished")
                     }
                 }
 
@@ -361,7 +366,7 @@ final class TrustedRequest<
     private func checkRateLimiting() async throws -> UInt {
         let requestMetadataForRateLimit = RateLimiterRequestMetadata(
             configuration: self.configuration,
-            paramaters: self.parameters
+            parameters: self.parameters
         )
         if let rateLimitInfo = await self.rateLimiter.rateLimitDenialInfo(now: Date.now, for: requestMetadataForRateLimit, sessionID: configuration.sessionID) {
             // This means the rate limiter does not want us to proceed.
@@ -371,10 +376,10 @@ final class TrustedRequest<
         let sessionCount: UInt
         if let sessionID = self.configuration.sessionID {
             sessionCount = await self.rateLimiter.sessionProgress(now: Date.now, for: sessionID)
-            self.logger.log("\(self.lp): using session identifier \(sessionID) with progress \(sessionCount)")
+            self.logger.log("\(self.logPrefix) using session identifier \(sessionID) with progress \(sessionCount)")
         } else {
             sessionCount = 0
-            self.logger.log("\(self.lp): no session identifier on request")
+            self.logger.log("\(self.logPrefix) no session identifier on request")
         }
         return sessionCount
     }
@@ -382,7 +387,7 @@ final class TrustedRequest<
     private func updateRateLimiting() async {
         let requestMetadataForRateLimit = RateLimiterRequestMetadata(
             configuration: self.configuration,
-            paramaters: self.parameters
+            parameters: self.parameters
         )
         // This is sent as we run the ropes request outbound send. It
         // is positioned this way so that if any of the non-ropes request
@@ -421,18 +426,18 @@ final class TrustedRequest<
     private func loadCachedAttestations() async -> [ValidatedAttestationOrAttestation] {
         // without store we can't load any attestations
         guard let store = self.attestationStore else {
-            self.logger.error("\(self.lp): unable to access attestation store")
+            self.logger.error("\(self.logPrefix) unable to access attestation store")
             return []
         }
         // get all unexpired attestations
         guard let prefetchParameters = TC2PrefetchParameters().prefetchParameters(invokeParameters: self.parameters) else {
-            self.logger.error("\(self.lp): invalid set of parameters for prefetching")
+            self.logger.error("\(self.logPrefix) invalid set of parameters for prefetching")
             return []
         }
 
         let maxPrefetchedAttestations = self.configuration.maxPrefetchedAttestations
         let cachedAttestations = await store.getAttestationsForRequest(parameters: prefetchParameters, serverRequestID: self.serverRequestID, maxAttestations: maxPrefetchedAttestations)
-        self.logger.log("\(self.lp): Total cached attestations from store: \(cachedAttestations.count) maxPrefetchedAttestations: \(maxPrefetchedAttestations)")
+        self.logger.log("\(self.logPrefix) Total cached attestations from store: \(cachedAttestations.count) maxPrefetchedAttestations: \(maxPrefetchedAttestations)")
 
         var count = 0
         let result = cachedAttestations.map { (key, validatedAttestation) in
@@ -440,7 +445,7 @@ final class TrustedRequest<
                 count += 1
             }
 
-            self.logger.log("\(self.lp): creating verified node with identifier: \(key), ohttpcontext: \(count + 10)")
+            self.logger.log("\(self.logPrefix) creating verified node with identifier: \(key), ohttpcontext: \(count + 10)")
             return ValidatedAttestationOrAttestation.cachedValidatedAttestation(validatedAttestation, ohttpContext: UInt64(count + 10))
         }
         return result
@@ -457,7 +462,7 @@ final class TrustedRequest<
         ropesInvokeRequestSentEvent: TC2Event<Void>,
         nodeSelectedEvent: TC2Event<Void>
     ) async throws {
-        defer { self.logger.debug("\(self.lp) Finished root connection subtask") }
+        defer { self.logger.debug("\(self.logPrefix) Finished root connection subtask") }
 
         let httpRequest = HTTPRequest(
             method: .post,
@@ -503,7 +508,7 @@ final class TrustedRequest<
             if allowed.contains(elm.key) {
                 return true
             } else {
-                self.logger.warning("\(self.lp) found workload parameter not in allow list: \(elm.key)")
+                self.logger.error("\(self.logPrefix) found workload parameter not in allow list: \(elm.key)")
                 return false
             }
         }
@@ -520,7 +525,7 @@ final class TrustedRequest<
 
         var headers: HTTPFields = [
             .appleRequestUUID: self.serverRequestID.uuidString,
-            .appleClientInfo: tc2OSInfo,
+            .appleClientInfo: self.systemInfo.osInfo,
             .appleWorkload: parameters.pipelineKind,
             .appleWorkloadParameters: workloadParametersAsString,
             .appleQOS: self.configuration.serverQoS.rawValue,
@@ -533,7 +538,7 @@ final class TrustedRequest<
         if let featureIdentifier = self.configuration.featureID {
             headers[.appleFeatureID] = featureIdentifier
         }
-        if let automatedDeviceGroup = OSASystemConfiguration.automatedDeviceGroup() {
+        if let automatedDeviceGroup = self.systemInfo.automatedDeviceGroup {
             headers[.appleAutomatedDeviceGroup] = automatedDeviceGroup
         }
         if let testSignalHeader = self.configuration.testSignalHeader {
@@ -547,7 +552,7 @@ final class TrustedRequest<
             // If there is an override cell id, we ALWAYS want to set it, regardless of presence of cached attestations
             headers[.appleServerHint] = overrideCellID
 
-            // We also set a flag to mark that there is an overriden cell id
+            // We also set a flag to mark that there is an overridden cell id
             headers[.appleServerHintForReal] = "true"
         } else if let node = cachedAttestations.first, let cellID = node.validatedCellID {
             headers[.appleServerHint] = cellID
@@ -558,47 +563,43 @@ final class TrustedRequest<
         if let authString = headers[HTTPField.Name.authorization] {
             loggedHeaders[.authorization] = authString.prefix(32) + "<...>"
         }
-        self.logger.log("\(self.lp) sending headers: \(String(describing: loggedHeaders))")
+        self.logger.log("\(self.logPrefix) sending headers: \(String(describing: loggedHeaders))")
         return headers
     }
 
     private func makeInvokeRequest(cachedNodes: [ValidatedAttestationOrAttestation]) -> Proto_Ropes_HttpService_InvokeRequest {
-        Proto_Ropes_HttpService_InvokeRequest.with { req in
-            req.type = .setupRequest(
-                .with({ setupRequest in
-                    setupRequest.encryptedRequestOhttpContext = UInt32(self.requestOHTTPContext)
-                    setupRequest.capabilities = .with { caps in
-                        caps.compressionAlgorithm = [.brotli]
+        return .with {
+            $0.setupRequest = .with {
+                $0.encryptedRequestOhttpContext = UInt32(self.requestOHTTPContext)
+                $0.capabilities.compressionAlgorithm = [.brotli]
+                $0.capabilities.attestationStreaming = true
+                $0.attestationMappings = cachedNodes.map { node in
+                    return .with {
+                        self.logger.log("\(self.logPrefix) adding prefetched attestation for node: \(node.identifier) ohttpContext: \(UInt32(node.ohttpContext))")
+                        $0.nodeIdentifier = node.identifier
+                        $0.ohttpContext = UInt32(node.ohttpContext)
                     }
-                    setupRequest.attestationMappings = cachedNodes.map { (node) in
-                        Proto_Ropes_HttpService_InvokeRequest.SetupRequest.AttestationMapping.with {
-                            self.logger.log("\(self.lp): adding prefetched attestation for node: \(node.identifier) ohttpContext: \(UInt32(node.ohttpContext))")
-                            $0.nodeIdentifier = node.identifier
-                            $0.ohttpContext = UInt32(node.ohttpContext)
-                        }
-                    }
-                }))
+                }
+            }
         }
     }
 
     private func makePrivateCloudComputeSendAuthTokenRequest(
         _ token: LinkedTokenPair
     ) -> Proto_PrivateCloudCompute_PrivateCloudComputeRequest {
-        Proto_PrivateCloudCompute_PrivateCloudComputeRequest.with {
-            $0.type = .authToken(
-                .with { at in
-                    at.tokenGrantingToken = token.tokenGrantingToken
-                    at.ottSalt = token.salt
-                }
-            )
+        return .with {
+            $0.authToken = .with {
+                $0.tokenGrantingToken = token.tokenGrantingToken
+                $0.ottSalt = token.salt
+            }
         }
     }
 
     private func makePrivateCloudComputeSendApplicationPayloadRequest(
         data: Data
     ) -> Proto_PrivateCloudCompute_PrivateCloudComputeRequest {
-        Proto_PrivateCloudCompute_PrivateCloudComputeRequest.with {
-            $0.type = .applicationPayload(data)
+        return .with {
+            $0.applicationPayload = data
         }
     }
 
@@ -614,25 +615,32 @@ final class TrustedRequest<
 
         do {
             for try await message in responseMessageStream {
-                self.logger.log("\(self.lp): received message: \(String(describing: message.type))")
+                self.logger.log("\(self.logPrefix) received message: \(String(describing: message.type))")
 
                 switch message.type {
+                case .attestation(let attestation):
+                    self.handleAttestation(attestation, continuation: unverifiedNodeContinuation)
+
                 case .attestationList(let attestationList):
                     self.handleAttestationList(attestationList, continuation: unverifiedNodeContinuation)
+
+                case .compressedAttestationList(let compressedAttestationList):
+                    let compressedAttestations = tc2AttestationListFromCompressedAttestationList(compressedAttestationList, logger: self.logger)
+                    self.handleAttestationList(compressedAttestations, continuation: unverifiedNodeContinuation)
 
                 case .nodeSelected:
                     self.requestMetrics.nodeSelected()
                     nodeSelectedEvent.fireNonisolated()
 
                 case .loggingMetadata(let metadata):
-                    self.logger.log("\(self.lp): logging metadata message: \(metadata.message)")
+                    self.logger.log("\(self.logPrefix) logging metadata message: \(metadata.message)")
 
                 case .rateLimitConfigurationList(let rateLimitConfigurationList):
-                    self.logger.debug("\(self.lp): received \(rateLimitConfigurationList.rateLimitConfiguration.count) rate limit configurations")
+                    self.logger.debug("\(self.logPrefix) received \(rateLimitConfigurationList.rateLimitConfiguration.count) rate limit configurations")
                     self.handleRateLimitConfigurationList(rateLimitConfigurationList)
 
                 case .expiredAttestationList(let expiredAttestationList):
-                    self.logger.debug("\(self.lp): received expired attestation message for paramaters  \(String(describing: self.parameters)). Will refresh attestations out of band")
+                    self.logger.debug("\(self.logPrefix) received expired attestation message for parameters  \(String(describing: self.parameters)). Will refresh attestations out of band")
                     self.eventStreamContinuation.yield(.expiredAttestationList(expiredAttestationList, self.parameters))
 
                 case .noFurtherAttestations:
@@ -644,15 +652,11 @@ final class TrustedRequest<
                     unverifiedNodeContinuation.finish()
                     self.requestMetrics.noFurtherAttestations()
 
-                case .compressedAttestationList(let compressedAttestationList):
-                    let compressedAttestations = tc2AttestationListFromCompressedAttestationList(compressedAttestationList, logger: self.logger)
-                    self.handleAttestationList(compressedAttestations, continuation: unverifiedNodeContinuation)
-
                 case .none:
                     break
 
                 @unknown default:
-                    self.logger.warning("\(self.lp): unknown: \(String(describing: message.type))")
+                    self.logger.error("\(self.logPrefix) unknown: \(String(describing: message.type))")
                 }
             }
         } catch {
@@ -662,7 +666,7 @@ final class TrustedRequest<
     }
 
     private func processResponseContext(_ received: NWConnectionReceived) throws -> Data? {
-        self.logger.log("\(self.lp): receive: content: \(String(describing: received.data)), contentContext: \(String(describing: received.contentContext)), isComplete: \(received.isComplete)")
+        self.logger.log("\(self.logPrefix) receive: content: \(String(describing: received.data)), contentContext: \(String(describing: received.contentContext)), isComplete: \(received.isComplete)")
 
         // the response head and response end are hidden in the contentContext. If there is no
         // contextContext we just forward the data for further processing.
@@ -671,13 +675,13 @@ final class TrustedRequest<
         }
 
         for field in httpResponse.headerFields {
-            self.logger.log("\(self.lp): Ropes response header: \(field.name): \(field.value)")
+            self.logger.log("\(self.logPrefix) Ropes response header: \(field.name): \(field.value)")
         }
 
         if let httpMetadata = responseContext.protocolMetadata(definition: NWProtocolHTTP.definition) as? NWProtocolHTTP.Metadata {
             if let trailerFields = httpMetadata.trailerFields {
                 for field in trailerFields {
-                    self.logger.log("\(self.lp): Ropes response trailer: \(field.name): \(field.value)")
+                    self.logger.log("\(self.logPrefix) Ropes response trailer: \(field.name): \(field.value)")
                 }
             }
         }
@@ -735,7 +739,7 @@ final class TrustedRequest<
         //  “description” response header contains the description of the error. This header might not be set in production environments
         //  “cause” response header contains a short description of the cause of the error. This header might not be set in production environments
         //  “retry-after” response headers contains the number of seconds that the client should wait before retrying
-        //  "ttr-*" response headers contains the context of a Tap-to-radar indicaiton from ROPES
+        //  "ttr-*" response headers contains the context of a Tap-to-radar indication from ROPES
 
         let responseMetadata = TC2RopesResponseMetadata(response, contentContext: contentContext)
         if responseMetadata.isAvailabilityConcern, let retryAfter = responseMetadata.retryAfter {
@@ -770,14 +774,35 @@ final class TrustedRequest<
         }
     }
 
+    private func handleAttestation(
+        _ attestation: Proto_Ropes_Common_Attestation,
+        continuation: AsyncStream<ValidatedAttestationOrAttestation>.Continuation
+    ) {
+        self.logger.debug("\(self.logPrefix) received another attestations")
+        self.logger.debug("\(self.logPrefix) attestation with \(attestation.ohttpContext) ohttp context")
+        let mapped = ValidatedAttestationOrAttestation.inlineAttestation(
+            Attestation(
+                attestation: attestation,
+                requestParameters: self.parameters
+            ),
+            ohttpContext: UInt64(attestation.ohttpContext)
+        )
+
+        self.requestMetrics.attestationsReceived(CollectionOfOne(mapped))
+        continuation.yield(mapped)
+
+        // NOTE: do not cache attestation. See: rdar://124965521 (Attestations received in response to an invoke should not be cached)
+        // Attestations should only be added as a result of prefetching.
+    }
+
     private func handleAttestationList(
         _ attestationList: Proto_Ropes_Common_AttestationList,
         continuation: AsyncStream<ValidatedAttestationOrAttestation>.Continuation
     ) {
-        self.logger.debug("\(self.lp): received more \(attestationList.attestation.count) attestations")
+        self.logger.debug("\(self.logPrefix) received more \(attestationList.attestation.count) attestations")
 
         let attestations = attestationList.attestation.map { attestation in
-            self.logger.debug("\(self.lp): attestation with \(attestation.ohttpContext) ohttp context")
+            self.logger.debug("\(self.logPrefix) attestation with \(attestation.ohttpContext) ohttp context")
             return ValidatedAttestationOrAttestation.inlineAttestation(
                 Attestation(
                     attestation: attestation,
@@ -808,7 +833,7 @@ final class TrustedRequest<
             ) {
                 return rateLimitConfig
             } else {
-                self.logger.error("\(self.lp) unable to process rate limit configuration \(String(describing: proto))")
+                self.logger.error("\(self.logPrefix) unable to process rate limit configuration \(String(describing: proto))")
                 return nil
             }
         }
@@ -831,7 +856,7 @@ final class TrustedRequest<
             let authFrame = try framer.frameMessage(authMessage)
             budget -= authFrame.count
 
-            self.logger.debug("\(self.lp) Sending auth message on data stream. Remaining budget before node selected: \(budget)")
+            self.logger.debug("\(self.logPrefix) Sending auth message on data stream. Remaining budget before node selected: \(budget)")
 
             try await dataStreamOutbound.write(
                 content: authFrame,
@@ -843,7 +868,7 @@ final class TrustedRequest<
         var userStreamIsFinished = false
         while !userStreamIsFinished {
             try await self.outgoingUserDataWriter.withNextOutgoingElement { outgoingUserData in
-                self.logger.debug("\(self.lp) Received user data to forward to server")
+                self.logger.debug("\(self.logPrefix) Received user data to forward to server")
                 if outgoingUserData.isComplete {
                     userStreamIsFinished = true
                     if outgoingUserData.data.isEmpty {
@@ -865,7 +890,7 @@ final class TrustedRequest<
                 self.requestMetrics.receivedOutgoingUserDataChunk()
 
                 if nodeSelected {
-                    self.logger.debug("\(self.lp) Sending message on data stream, node selected")
+                    self.logger.debug("\(self.logPrefix) Sending message on data stream, node selected")
                     try await self.requestMetrics.observeDataWrite(bytesToSend: message.count) {
                         try await dataStreamOutbound.write(
                             content: message,
@@ -875,7 +900,7 @@ final class TrustedRequest<
                     }
                 } else {
                     if message.count <= budget {  // do we fit into our budget
-                        self.logger.debug("\(self.lp) Sending message on data stream, within inital budget: \(budget)")
+                        self.logger.debug("\(self.logPrefix) Sending message on data stream, within initial budget: \(budget)")
                         try await self.requestMetrics.observeDataWrite(bytesToSend: message.count, inBudget: true) {
                             try await dataStreamOutbound.write(
                                 content: message,
@@ -885,7 +910,7 @@ final class TrustedRequest<
                         }
                         budget -= message.count
                     } else {
-                        self.logger.debug("\(self.lp) Sending message on data stream (\(message.count) bytes), above initial budget: \(budget) bytes")
+                        self.logger.debug("\(self.logPrefix) Sending message on data stream (\(message.count) bytes), above initial budget: \(budget) bytes")
                         let sendAfterNodeSelected: Data
                         // we are over budget
                         if budget > 0 {
@@ -903,10 +928,10 @@ final class TrustedRequest<
                             sendAfterNodeSelected = message
                         }
 
-                        self.logger.debug("\(self.lp) Waiting on node selected")
+                        self.logger.debug("\(self.logPrefix) Waiting on node selected")
                         try await nodeSelectedEvent()
                         nodeSelected = true
-                        self.logger.debug("\(self.lp) Node selected")
+                        self.logger.debug("\(self.logPrefix) Node selected")
 
                         try await self.requestMetrics.observeDataWrite(
                             bytesToSend: sendAfterNodeSelected.count,
@@ -922,7 +947,7 @@ final class TrustedRequest<
                 }
             }
         }
-        self.logger.log("\(self.lp) Finished sending all user data")
+        self.logger.log("\(self.logPrefix) Finished sending all user data")
         self.requestMetrics.dataStreamFinished()
     }
 
@@ -939,7 +964,7 @@ final class TrustedRequest<
         ropesInvokeRequestSentEvent: TC2Event<Void>,
         ohttpStreamFactory: ConnectionFactory.OHTTPSubStreamFactory
     ) async throws {
-        defer { self.logger.debug("\(self.lp) Leaving runNodesStreams") }
+        defer { self.logger.debug("\(self.logPrefix) Leaving runNodesStreams") }
 
         let (reportableNodeUniqueIdStream, reportableNodeUniqueIdContinuation) = AsyncStream.makeStream(of: String.self)
         async let _: Void = {
@@ -970,7 +995,7 @@ final class TrustedRequest<
                     if inlineNodeIDs.count >= self.configuration.maxInlineAttestations {
                         let count = inlineNodeIDs.count
                         // TODO: consider storing this attestation somewhere so we can log it in thtool requests, etc.; probably overkill though.
-                        self.logger.warning("\(self.lp): ignoring node \(node.identifier); already have \(count) attestations out of \(self.configuration.maxTotalAttestations) max")
+                        self.logger.error("\(self.logPrefix) ignoring node \(node.identifier); already have \(count) attestations out of \(self.configuration.maxTotalAttestations) max")
                         continue
                     }
 
@@ -978,77 +1003,91 @@ final class TrustedRequest<
                 }
 
                 if runningNodeIDs.contains(node.identifier) {
-                    self.logger.debug("\(self.lp): already have a node with identifier \(node.identifier), conflict: \(node.ohttpContext)")
+                    self.logger.debug("\(self.logPrefix) already have a node with identifier \(node.identifier), conflict: \(node.ohttpContext)")
                     continue
                 }
 
                 if runningNodeIDs.count >= self.configuration.maxTotalAttestations {
                     let count = runningNodeIDs.count
                     // TODO: consider storing this attestation somewhere so we can log it in thtool requests, etc.; probably overkill though.
-                    self.logger.warning("\(self.lp): ignoring node \(node.identifier); already have \(count) attestations out of \(self.configuration.maxTotalAttestations) max")
+                    self.logger.error("\(self.logPrefix) ignoring node \(node.identifier); already have \(count) attestations out of \(self.configuration.maxTotalAttestations) max")
                     continue
                 }
 
                 runningNodeIDs.insert(node.identifier)
 
                 taskGroup.addTask {
-                    self.logger.log("\(self.lp): Creating node stream subtask for node: \(node.identifier)")
+                    // The cancellation handler is merely for logging
+                    try await withTaskCancellationHandler {
+                        self.logger.log("\(self.logPrefix) Creating node stream subtask for node: \(node.identifier)")
 
-                    defer { self.logger.debug("\(self.lp) Leaving node stream subtask for node: \(node.identifier)") }
-                    return try await withThrowingTaskGroup(of: RunNodeStreamResult.self, returning: RunNodeStreamResult.self) { taskGroup in
-                        taskGroup.addTask {
-                            do {
-                                try await nodeStreamController.registerNodeStream(nodeID: node.identifier)
-                                return .finished
-                            } catch {
-                                self.logger.debug("\(self.lp): cancelled node stream \(node.identifier)")
-                                return .cancelledAsOtherNodeSelected
-                            }
-                        }
-
-                        taskGroup.addTask {
-                            let validatedAttestation: ValidatedAttestation
-                            let ohhtpContext: UInt64 = node.ohttpContext
-                            switch node {
-                            case .cachedValidatedAttestation(let attestation, _):
-                                validatedAttestation = attestation
-
-                            case .inlineAttestation(let attestation, _):
-                                self.logger.log("\(self.lp): verifying attestation for context \(node.ohttpContext)")
-                                // the state after verify attestation is set in `verifyAttestation(node:)`
+                        defer { self.logger.debug("\(self.logPrefix) Leaving node stream subtask for node: \(node.identifier)") }
+                        return try await withThrowingTaskGroup(of: RunNodeStreamResult.self, returning: RunNodeStreamResult.self) { taskGroup in
+                            taskGroup.addTask {
                                 do {
-                                    validatedAttestation = try await self.verifyAttestation(attestation: attestation)
-                                    if let uniqueNodeIdentifier = validatedAttestation.uniqueNodeIdentifier {
-                                        reportableNodeUniqueIdContinuation.yield(uniqueNodeIdentifier)
-                                    }
+                                    // This call to `registerNodeStream` will suspend at least until some node is
+                                    // selected. Think of this suspension as controlling the timeout for the sibling
+                                    // task below which is doing the real work. If some other node is selected, then
+                                    // we throw here, which will cause the real work below to be cancelled. However,
+                                    // if this node is selected, then we will remain suspended forever, until such
+                                    // time as the real work completes and then cancels this task; which will simply
+                                    // resume.
+                                    try await nodeStreamController.registerNodeStream(nodeID: node.identifier)
+                                    return .finished
                                 } catch {
-                                    return .verifyAttestationFailed(error)
+                                    self.logger.debug("\(self.logPrefix) cancelled node stream \(node.identifier)")
+                                    return .cancelledAsOtherNodeSelected
                                 }
                             }
 
-                            // the sentKey state us set `runEndpointRequest(node:, request:)`
-                            return try await self.runNodeRequest(
-                                validatedAttestation: validatedAttestation,
-                                ohttpContext: ohhtpContext,
-                                ropesInvokeRequestSentEvent: ropesInvokeRequestSentEvent,
-                                nodeStreamController: nodeStreamController,
-                                ohttpStreamFactory: ohttpStreamFactory
-                            )
-                        }
+                            taskGroup.addTask {
+                                let validatedAttestation: ValidatedAttestation
+                                let ohhtpContext: UInt64 = node.ohttpContext
+                                switch node {
+                                case .cachedValidatedAttestation(let attestation, _):
+                                    validatedAttestation = attestation
 
-                        switch await taskGroup.nextResult()! {
-                        case .success(let success):
-                            taskGroup.cancelAll()
-                            return success
-                        case .failure(let error):
-                            taskGroup.cancelAll()
-                            throw error
+                                case .inlineAttestation(let attestation, _):
+                                    self.logger.log("\(self.logPrefix) verifying attestation for context \(node.ohttpContext)")
+                                    // the state after verify attestation is set in `verifyAttestation(node:)`
+                                    do {
+                                        validatedAttestation = try await self.verifyAttestation(attestation: attestation)
+                                        if let uniqueNodeIdentifier = validatedAttestation.uniqueNodeIdentifier {
+                                            reportableNodeUniqueIdContinuation.yield(uniqueNodeIdentifier)
+                                        }
+                                    } catch {
+                                        return .verifyAttestationFailed(error)
+                                    }
+                                }
+
+                                // the sentKey state us set `runEndpointRequest(node:, request:)`
+                                return try await self.runNodeRequest(
+                                    validatedAttestation: validatedAttestation,
+                                    ohttpContext: ohhtpContext,
+                                    ropesInvokeRequestSentEvent: ropesInvokeRequestSentEvent,
+                                    nodeStreamController: nodeStreamController,
+                                    ohttpStreamFactory: ohttpStreamFactory
+                                )
+                            }
+
+                            switch await taskGroup.nextResult()! {
+                            case .success(let success):
+                                taskGroup.cancelAll()
+                                return success
+                            case .failure(let error):
+                                taskGroup.cancelAll()
+                                throw error
+                            }
                         }
+                    } onCancel: {
+                        // I want to know when a cancellation comes in from above; in contrast to the
+                        // situation where the subtasks cancel each other.
+                        self.logger.log("\(self.logPrefix) Node stream subtask has been cancelled for node: \(node.identifier)")
                     }
                 }  // end node subtask group
             }  // end node for loop
 
-            self.logger.debug("\(self.lp) Not expecting more attestations. Running with \(runningNodeIDs.count) attestations")
+            self.logger.debug("\(self.logPrefix) Not expecting more attestations. Running with \(runningNodeIDs.count) attestations")
 
             var verificationFailures: [any Error] = []
             var atLeastOneSucceeded = false
@@ -1057,7 +1096,7 @@ final class TrustedRequest<
             var completed = 0
             while let result = await taskGroup.nextResult() {
                 completed += 1
-                self.logger.debug("\(self.lp) Node substream task finished. Remaining: \(runningNodeIDs.count - completed)")
+                self.logger.debug("\(self.logPrefix) Node substream task finished. Remaining: \(runningNodeIDs.count - completed)")
                 switch result {
                 case .success(.verifyAttestationFailed(let error)):
                     verificationFailures.append(error)
@@ -1070,8 +1109,8 @@ final class TrustedRequest<
                 }
             }
 
-            self.logger.debug("\(self.lp) All \(runningNodeIDs.count) node substreams have finished")
-            defer { self.logger.debug("\(self.lp) Leaving runNodesStreams taskGroup. Success: \(atLeastOneSucceeded)") }
+            self.logger.debug("\(self.logPrefix) All \(runningNodeIDs.count) node substreams have finished")
+            defer { self.logger.debug("\(self.logPrefix) Leaving runNodesStreams taskGroup. Success: \(atLeastOneSucceeded)") }
 
             if !atLeastOneSucceeded {
                 if verificationFailures.count == runningNodeIDs.count, verificationFailures.count > 0 {
@@ -1095,10 +1134,10 @@ final class TrustedRequest<
         ) {
             do {
                 let validatedAttestation = try await self.attestationVerifier.validate(attestation: attestation)
-                self.logger.log("\(self.lp): attestation success with package key \(validatedAttestation.publicKey), validationExpiration: \(validatedAttestation.attestationExpiry)")
+                self.logger.log("\(self.logPrefix) attestation success with package key \(validatedAttestation.publicKey), validationExpiration: \(validatedAttestation.attestationExpiry)")
                 return validatedAttestation
             } catch {
-                self.logger.log("\(self.lp): attestation failure with error \(error)")
+                self.logger.log("\(self.logPrefix) attestation failure with error \(error)")
                 throw error
             }
         }
@@ -1112,7 +1151,7 @@ final class TrustedRequest<
         ohttpStreamFactory: ConnectionFactory.OHTTPSubStreamFactory
     ) async throws -> RunNodeStreamResult {
         let nodeID = validatedAttestation.attestation.nodeID
-        self.logger.log("\(self.lp): starting node stream to \(nodeID); creating request...")
+        self.logger.log("\(self.logPrefix) starting node stream to \(nodeID); creating request...")
 
         return try await ohttpStreamFactory.withOHTTPSubStream(
             ohttpContext: ohttpContext,
@@ -1143,9 +1182,9 @@ final class TrustedRequest<
             var isFirstMessage = true
 
             receiveLoop: for try await message in deframed {
-                self.logger.debug("\(self.lp): Received message from node \(nodeID): \(String(describing: message.type))")
+                self.logger.debug("\(self.logPrefix) Received message from node \(nodeID): \(String(describing: message.type))")
                 if isFirstMessage {
-                    self.logger.debug("\(self.lp): Node has received data, cancelling all other node streams")
+                    self.logger.debug("\(self.logPrefix) Node has received data, cancelling all other node streams")
                     nodeStreamController.dataReceived(nodeID: nodeID)
                     self.requestMetrics.nodeFirstResponseReceived(nodeID: nodeID)
                     isFirstMessage = false
@@ -1166,24 +1205,26 @@ final class TrustedRequest<
                         return UUID(uuid: uuid)
                     }
 
-                    self.logger.debug("\(self.lp): Response UUID: \(uuid)")
+                    self.logger.debug("\(self.logPrefix) Response UUID: \(uuid)")
 
                 case .responseSummary(let responseSummary):
                     self.requestMetrics.nodeSummaryReceived(nodeID: nodeID)
-                    self.logger.debug("\(self.lp): Response summary: \(responseSummary.debugDescription)")
+                    self.logger.debug("\(self.logPrefix) Response summary: \(responseSummary.loggingDescription)")
                     switch responseSummary.responseStatus {
                     case .ok:
                         break  // no error
                     case .unauthenticated:
                         throw TrustedRequestError(code: .responseSummaryIndicatesUnauthenticated)
+                    case .internalError:
+                        throw TrustedRequestError(code: .responseSummaryIndicatesInternalError)
                     case .invalidRequest:
                         throw TrustedRequestError(code: .responseSummaryIndicatesInvalidRequest)
-                    default:
+                    case .UNRECOGNIZED(_):
                         throw TrustedRequestError(code: .responseSummaryIndicatesFailure)
                     }
 
                 case .responsePayload(let payload):
-                    self.logger.debug("\(self.lp): Received payload \(payload.count) bytes from node \(ohttpContext)")
+                    self.logger.debug("\(self.logPrefix) Received payload \(payload.count) bytes from node \(ohttpContext)")
 
                     self.requestMetrics.nodeResponsePayloadReceived(nodeID: nodeID, bytes: payload.count)
                     try await self.incomingUserDataReader.forwardData(payload)
@@ -1199,7 +1240,7 @@ final class TrustedRequest<
             }
 
             self.requestMetrics.nodeResponseFinished(nodeID: nodeID)
-            self.logger.debug("\(self.lp): Received all messages in node stream: \(nodeID)")
+            self.logger.debug("\(self.logPrefix) Received all messages in node stream: \(nodeID)")
 
             return .finished
         }
@@ -1262,14 +1303,6 @@ enum ValidatedAttestationOrAttestation {
         case .inlineAttestation(let attestation, _):
             return attestation.cloudOSReleaseType
         }
-    }
-}
-
-struct LogPrefix: CustomStringConvertible {
-    let requestID: UUID
-
-    var description: String {
-        "Request: \(self.requestID)"
     }
 }
 

@@ -13,8 +13,9 @@
 // 10/02/2024
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
+import CloudBoardController
 
 public protocol ServiceDiscoveryPublisherProtocol {
-    func announceService(name: String, workloadConfig: [String: [String]])
+    func announceService(name: String, workloadConfig: [String: WorkloadConfig.RoutingTagValue])
     func retractService(name: String)
 }

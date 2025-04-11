@@ -46,13 +46,13 @@ struct TransparencyLog: Sendable {
     static let requestUUIDHeader = "X-Apple-Request-UUID"
 
     static let logger = os.Logger(subsystem: applicationName, category: "TransparencyLog")
-    static var traceLog: Bool = false
+    static var traceLog: Bool = false // include (excessive) debugging messages of Transparency Log calls
 
     let environment: Environment
     let tlsInsecure: Bool // don't verify certificates; use "http:" in URI to skip TLS altogether
-    let traceLog: Bool // include (excessive) debugging messages of Transparency Log calls
     let instanceUUID: UUID // passed into upstream API (for logging)
     var ktInitBag: KTInitBag? // KT Init Bag (links to Transparency endpoints for selected env/application)
+    var useIdentity: Bool { !self.tlsInsecure && self.environment != .production } // for mTLS
 
     init(
         environment: Environment,
@@ -63,9 +63,9 @@ struct TransparencyLog: Sendable {
     ) async throws {
         self.environment = environment
         self.tlsInsecure = tlsInsecure
-        self.traceLog = traceLog
         self.instanceUUID = UUID()
 
+        TransparencyLog.traceLog = traceLog
         let uuidString = self.instanceUUID.uuidString
         TransparencyLog.logger.debug("Session UUID: \(uuidString, privacy: .public)")
 
@@ -80,7 +80,8 @@ struct TransparencyLog: Sendable {
             do {
                 self.ktInitBag = try await KTInitBag(
                     endpoint: endpoint,
-                    tlsInsecure: self.tlsInsecure
+                    tlsInsecure: self.tlsInsecure,
+                    useIdentity: self.useIdentity
                 )
             } catch {
                 throw TransparencyLogError("Fetch KT Init Bag: \(error)")
@@ -88,6 +89,200 @@ struct TransparencyLog: Sendable {
 
             if traceLog {
                 self.ktInitBag?.debugDump()
+            }
+        }
+    }
+
+    // urlGet performs a simple GET request against url and returns payload; throws an error
+    //  if request fails, doesn't obtain a 2xx response, or doesn't match provided mimeType
+    static func urlGet(
+        url: URL,
+        tlsInsecure: Bool = false,
+        useIdentity: Bool = false,
+        timeout: TimeInterval = 15,
+        headers: [String: String]? = nil,
+        mimeType: String? = nil
+    ) async throws -> (Data, URLResponse) {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        TransparencyLog.addRequestHeaders(&request, headers: headers)
+
+        return try await TransparencyLog.urlRequest(
+            request: request,
+            tlsInsecure: tlsInsecure,
+            useIdentity: useIdentity,
+            contentType: mimeType
+        )
+    }
+
+    // urlPostProtbuf performs a POST request against url with requestBody containing a serialized protobuf
+    //  and returns (serialized protobuf) payload; throws an error if request fails, doesn't obtain a
+    //  2xx response, or response content type != "application/protobuf"
+    static func urlPostProtbuf(
+        url: URL,
+        tlsInsecure: Bool = false,
+        useIdentity: Bool = false,
+        requestBody: Data,
+        timeout: TimeInterval = 15,
+        headers: [String: String]? = nil
+    ) async throws -> (Data, URLResponse) {
+        let pbContentType = "application/protobuf"
+
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.setValue(pbContentType, forHTTPHeaderField: "Content-Type")
+        request.httpBody = requestBody
+        TransparencyLog.addRequestHeaders(&request, headers: headers)
+
+        return try await TransparencyLog.urlRequest(
+            request: request,
+            tlsInsecure: tlsInsecure,
+            useIdentity: useIdentity,
+            contentType: pbContentType
+        )
+    }
+
+    // addRequestHeaders sets headers in the URL request
+    static func addRequestHeaders(_ request: inout URLRequest, headers: [String: String]? = nil) {
+        if let headers {
+            for (h, v) in headers {
+                request.addValue(v, forHTTPHeaderField: h)
+            }
+        }
+    }
+
+    // urlRequest issues populated request to endpoint and returns payload and response if status code 2xx is
+    //  received and (if contantType is set) confirms mimeType in payload matches expected.
+    //  TLS verification is suppressed if tlsInsecure is true.
+    static func urlRequest(
+        request: URLRequest,
+        tlsInsecure: Bool = false,
+        useIdentity: Bool = false,
+        contentType: String? = nil,
+        rateLimitStart: Duration = .milliseconds(100),
+        rateLimitMax: Duration = .milliseconds(1000)
+    ) async throws -> (Data, URLResponse) {
+        let session: URLSession
+        if tlsInsecure {
+            session = URLSession(configuration: .default,
+                                 delegate: TransparencyLog.InsecureTLSDelegate(),
+                                 delegateQueue: nil)
+        } else if useIdentity {
+            session = URLSession(configuration: .default,
+                                 delegate: TransparencyLog.MutualTLSDelegate(identityProvider: AnyIdentityProvider()),
+                                 delegateQueue: nil)
+        } else {
+            session = URLSession.shared
+        }
+
+        var retryWait = rateLimitStart // x2 upto rateLimitMax
+        var retryLogDeadline = Date(timeIntervalSinceNow: 0) // emit log when expire
+        let retryLogEverySec: Double = 10 // .. and every # sec
+
+        while true {
+            let (respData, response) = try await session.data(for: request)
+            TransparencyLog.dumpURLResponse(response: response)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw URLError(.badServerResponse, userInfo: ["reason": "failed to get response"])
+            }
+
+            // server reported rate limit exceeded
+            if httpResponse.statusCode == 429 {
+                if Date() > retryLogDeadline {
+                    let reqHost = request.url?.host() ?? "[host unknown]"
+                    TransparencyLog.logger.log("\(reqHost, privacy: .public): throttling requests due to rate limit")
+                    retryLogDeadline = Date(timeIntervalSinceNow: retryLogEverySec)
+                }
+
+                try? await Task.sleep(for: retryWait)
+                retryWait = max(retryWait * 2, rateLimitMax)
+                continue
+            }
+
+            guard (200 ... 299).contains(httpResponse.statusCode) else {
+                throw URLError(.badServerResponse,
+                               userInfo: ["reason": "request failed (error: \(httpResponse.statusCode))"])
+            }
+
+            if let contentType {
+                guard httpResponse.mimeType == contentType else {
+                    throw URLError(.cannotParseResponse,
+                                   userInfo: ["reason": "request returned contentType=\(httpResponse.mimeType ?? "unset")"])
+                }
+            }
+
+            return (respData, response)
+        }
+    }
+
+    // dumpURLResponse outputs contents of response from a URLSession call to debug log channel (trace level)
+    private static func dumpURLResponse(response: URLResponse) {
+        guard TransparencyLog.traceLog else {
+            return
+        }
+
+        func _dlog(_ msg: String) {
+            TransparencyLog.logger.debug("\(msg, privacy: .public)")
+        }
+
+        _dlog("URL Response:")
+        _dlog("  URL: \(response.url?.absoluteString ?? "unset")")
+        _dlog("  mimeType: \(response.mimeType ?? "unset")")
+        _dlog("  expectedContentLength: \(response.expectedContentLength)")
+        if let suggestedFilename = response.suggestedFilename {
+            _dlog("  suggestedFilename: \(suggestedFilename)")
+        }
+        if let textEncodingName = response.textEncodingName {
+            _dlog("  textEncodingName: \(textEncodingName)")
+        }
+
+        if let httpResponse = response as? HTTPURLResponse {
+            _dlog("  Status: \(httpResponse.statusCode)")
+            _dlog("  Headers:")
+            for (h, v) in httpResponse.allHeaderFields {
+                _dlog("    \(h as? String): \(v as? String)")
+            }
+        }
+    }
+
+    // InsecureTLSDelegate is a URLSessionDelegate to bypass certificate errors on TLS connections
+    private class InsecureTLSDelegate: NSObject, URLSessionDelegate {
+        func urlSession(
+            _ session: URLSession,
+            didReceive challenge: URLAuthenticationChallenge,
+            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        ) {
+            if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
+                completionHandler(.useCredential,
+                                  URLCredential(trust: challenge.protectionSpace.serverTrust!))
+            } else {
+                completionHandler(.performDefaultHandling, nil)
+            }
+        }
+    }
+
+    // MutualTLSDelegate is a URLSessionDelegate to provide mutual TLS backed by Apple Narrative identity certs
+    private class MutualTLSDelegate: NSObject, URLSessionDelegate {
+        let identityProvider: IdentityProvider
+
+        init(identityProvider: IdentityProvider) {
+            self.identityProvider = identityProvider
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            didReceive challenge: URLAuthenticationChallenge,
+            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        ) {
+            if let identity = identityProvider.identity {
+                TransparencyLog.logger.debug("using identity certificate for mTLS request")
+                completionHandler(.useCredential,
+                                  URLCredential(identity: identity,
+                                                certificates: identity.intermediateCertificateAuthorities,
+                                                persistence: .forSession))
+            } else {
+                TransparencyLog.logger.error("mTLS requested but no identity available")
+                completionHandler(.performDefaultHandling, nil)
             }
         }
     }
@@ -105,11 +300,13 @@ extension TransparencyLog {
             throw TransparencyLogError("must provide Public Keys endpoint")
         }
 
-        TransparencyLog.logger.debug("Using KT Public Keys endpoint: \(endpoint.absoluteString, privacy: .public)")
+        let dbgEndpoint = "\(endpoint.absoluteString)\(self.useIdentity ? " [useIdentity=true]" : "")"
+        TransparencyLog.logger.debug("Using KT Public Keys endpoint: \(dbgEndpoint, privacy: .public)")
         do {
             let pubKeys = try await PublicKeys(
                 endpoint: endpoint,
                 tlsInsecure: tlsInsecure ?? self.tlsInsecure,
+                useIdentity: self.useIdentity,
                 requestUUID: self.instanceUUID
             )
 
@@ -131,20 +328,22 @@ extension TransparencyLog {
             throw TransparencyLogError("must provide List Keys endpoint")
         }
 
-        TransparencyLog.logger.debug("Using KT List Trees endpoint: \(endpoint.absoluteString, privacy: .public)")
+        let dbgEndpoint = "\(endpoint.absoluteString)\(self.useIdentity ? " [useIdentity=true]" : "")"
+        TransparencyLog.logger.debug("Using KT List Trees endpoint: \(dbgEndpoint, privacy: .public)")
 
         var logTrees: TransparencyLog.Trees
         do {
             logTrees = try await Trees(
                 endpoint: endpoint,
                 tlsInsecure: tlsInsecure ?? self.tlsInsecure,
+                useIdentity: self.useIdentity,
                 requestUUID: self.instanceUUID
             )
         } catch {
             throw TransparencyLogError("Fetch Log Trees: \(error)")
         }
 
-        if self.traceLog {
+        if TransparencyLog.traceLog {
             logTrees.debugDump()
         }
 
@@ -167,97 +366,29 @@ extension TransparencyLog {
         altEndpoint: URL? = nil,
         tlsInsecure: Bool? = nil
     ) async throws -> Head {
-        let logger = TransparencyLog.logger
         guard let endpoint = altEndpoint ?? ktInitBag?.url(.atResearcherLogHead) else {
             throw TransparencyLogError("must provide Log Head endpoint")
         }
 
-        TransparencyLog.logger.debug("Using Log Head endpoint: \(endpoint.absoluteString, privacy: .public)")
+        let dbgEndpoint = "\(endpoint.absoluteString)\(self.useIdentity ? " [useIdentity=true]" : "")"
+        TransparencyLog.logger.debug("Using Log Head endpoint: \(dbgEndpoint, privacy: .public)")
 
         do {
             let relLogHead = try await Head(
                 endpoint: endpoint,
                 tlsInsecure: tlsInsecure ?? self.tlsInsecure,
+                useIdentity: self.useIdentity,
                 logTree: logTree,
                 appCerts: nil, 
                 requestUUID: self.instanceUUID
             )
-            if self.traceLog {
-                logger.debug("LogHead: log size: \(relLogHead.size, privacy: .public); revision: \(relLogHead.revision, privacy: .public)")
+            if TransparencyLog.traceLog {
+                TransparencyLog.logger.debug("LogHead: log size: \(relLogHead.size, privacy: .public); revision: \(relLogHead.revision, privacy: .public)")
             }
             return relLogHead
         } catch {
             throw TransparencyLogError("Fetch Log Head for PCC: \(error)")
         }
-    }
-
-    func fetchATLogLeaves(
-        logTree: Tree,
-        logHead: Head,
-        reqCount: UInt = 10, // requested number of matching leaves
-        startWindow: Int64? = nil, // log index search windows
-        endWindow: UInt64? = nil,
-        windowSize: UInt64 = 100,
-        nodeDataType: ATLeafType? = nil, // eg .release node
-        altEndpoint: URL? = nil,
-        tlsInsecure: Bool? = nil
-    ) async throws -> ([ATLeaf], startIndex: UInt64, endIndex: UInt64) {
-        guard let endpoint = altEndpoint ?? ktInitBag?.url(.atResearcherLogLeaves) else {
-            throw TransparencyLogError("must provide Log Leaves endpoint")
-        }
-
-        TransparencyLog.logger.debug("Using Log Leaves endpoint: \(endpoint.absoluteString, privacy: .public)")
-
-        let maxIndex = logHead.size
-        var endIndex = UInt64(min(maxIndex, endWindow ?? maxIndex))
-        var startIndex: UInt64
-
-        if let startWindow {
-            startIndex = startWindow < 0 ? ((endIndex > -startWindow) ? endIndex - UInt64(-startWindow) : 0) :
-                UInt64(startWindow)
-        } else {
-            startIndex = (endIndex > windowSize) ? endIndex - windowSize + 1 : 0
-        }
-
-        guard startIndex < endIndex else {
-            throw TransparencyLogError("invalid index range")
-        }
-
-        let logLeaves = TransparencyLog.Leaves(
-            endpoint: endpoint,
-            tlsInsecure: tlsInsecure ?? self.tlsInsecure,
-            logTree: logTree
-        )
-
-        var atLeaves: [ATLeaf] = []
-        repeat {
-            do {
-                let leaves = try await logLeaves.fetch(startIndex: startIndex,
-                                                       endIndex: endIndex,
-                                                       requestUUID: self.instanceUUID,
-                                                       nodeDecoder: {
-                                                           guard let atleaf = ATLeaf($0) else {
-                                                               return nil as ATLeaf?
-                                                           }
-
-                                                           if let nodeDataType {
-                                                               guard atleaf.nodeData.type == nodeDataType else {
-                                                                   return nil as ATLeaf?
-                                                               }
-                                                           }
-
-                                                           return atleaf
-                                                       })
-                atLeaves.append(contentsOf: leaves)
-            } catch {
-                throw TransparencyLogError("Fetch Log Entries [\(startIndex)..\(endIndex)] for PCC: \(error)")
-            }
-
-            endIndex = endIndex > windowSize ? endIndex - windowSize : 0
-            startIndex = startIndex > windowSize ? startIndex - windowSize : 0
-        } while startIndex < endIndex && atLeaves.count < reqCount
-
-        return (atLeaves, startIndex, endIndex)
     }
 
     // MARK: - Generic leaf retrieval
@@ -279,14 +410,15 @@ extension TransparencyLog {
                                  head: Head,
                                  start: UInt64? = nil,
                                  end: UInt64? = nil,
-                                 batchSize: UInt64 = 3000) async throws -> [L]
+                                 batchSize: UInt64 = 3000,
+                                 altEndpoint: URL? = nil) async throws -> [L]
     {
-        guard let endpoint = ktInitBag?.url(.atResearcherLogLeaves) else {
+        guard let endpoint = altEndpoint ?? ktInitBag?.url(.atResearcherLogLeaves) else {
             throw TransparencyLogError("must provide Log Leaves endpoint")
         }
 
-        let logger = TransparencyLog.logger
-        logger.debug("Using Log Leaves endpoint: \(endpoint.absoluteString)")
+        let dbgEndpoint = "\(endpoint.absoluteString)\(self.useIdentity ? " [useIdentity=true]" : "")"
+        TransparencyLog.logger.debug("Using Log Leaves endpoint: \(dbgEndpoint, privacy: .public)")
 
         let maxIndex = head.size
         let endIndex = UInt64(min(maxIndex, end ?? maxIndex))
@@ -299,6 +431,7 @@ extension TransparencyLog {
         let logLeaves = TransparencyLog.Leaves(
             endpoint: endpoint,
             tlsInsecure: self.tlsInsecure,
+            useIdentity: self.useIdentity,
             logTree: tree
         )
 
@@ -307,19 +440,23 @@ extension TransparencyLog {
         var currentEnd = min(startIndex + batchSize, endIndex)
         repeat {
             do {
-                let leaves = try await logLeaves.fetch(startIndex: currentStart, endIndex: currentEnd, requestUUID: self.instanceUUID, nodeDecoder: {
-                    guard let leaf = L($0) else {
-                        return nil as L?
-                    }
-                    return leaf as L?
-                })
+                let leaves = try await logLeaves.fetch(startIndex: currentStart,
+                                                       endIndex: currentEnd,
+                                                       requestUUID: self.instanceUUID,
+                                                       nodeDecoder: {
+                                                           guard let leaf = L($0) else {
+                                                               return nil as L?
+                                                           }
+                                                           return leaf as L?
+                                                       })
                 outLeaves.append(contentsOf: leaves)
                 currentStart += batchSize
                 currentEnd = min(currentEnd + batchSize, endIndex)
             } catch {
-                throw TransparencyLogError("Fetch Log Entries [\(startIndex)..<\(endIndex)] for PCC: \(error)")
+                throw TransparencyLogError("fetch log entries [\(startIndex)..<\(endIndex)] for PCC: \(error)")
             }
         } while currentStart < currentEnd
+
         return outLeaves
     }
 }

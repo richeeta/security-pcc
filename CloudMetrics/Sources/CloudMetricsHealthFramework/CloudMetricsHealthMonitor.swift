@@ -14,6 +14,7 @@
 
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
+private import CloudMetricsUtils
 import os
 
 public actor CloudMetricsHealthMonitor {
@@ -22,7 +23,7 @@ public actor CloudMetricsHealthMonitor {
         category: "CloudMetricsHealthMonitor"
     )
 
-    enum Client {
+    private enum Client {
         case connected(CloudMetricsHealthXPCClient)
         case waitingForConnection(
             [Promise<CloudMetricsHealthXPCClient, any Error>]
@@ -111,7 +112,7 @@ public actor CloudMetricsHealthMonitor {
 }
 
 extension CloudMetricsHealthMonitor: CloudMetricsHealthXPCClientDelegateProtocol {
-    public func disconnected() async {
+    package func disconnected() async {
         Self.logger.log("Received 'Disconnected' from cloudmetricsd")
         self.client = .waitingForConnection([])
     }

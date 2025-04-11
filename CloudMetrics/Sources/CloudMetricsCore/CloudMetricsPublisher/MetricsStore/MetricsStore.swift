@@ -19,6 +19,8 @@
 //  Created by Andrius Aucinas on 09/09/2022.
 //
 
+internal import CloudMetricsConstants
+internal import CloudMetricsXPC
 import Foundation
 
 internal let kDefaultCapacity = 500

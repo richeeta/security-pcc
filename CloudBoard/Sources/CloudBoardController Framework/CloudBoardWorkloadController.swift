@@ -14,7 +14,7 @@
 
 //  Copyright © 2023 Apple Inc. All rights reserved.
 
-import CloudBoardCommon
+internal import CloudBoardCommon
 import os
 
 public actor CloudBoardWorkloadController {
@@ -93,20 +93,16 @@ public actor CloudBoardWorkloadController {
         self.disconnectHandler = handler
     }
 
-    public func startAcceptingRequests() async throws {
-        try await self.waitForClient().startAcceptingRequests()
-    }
-
-    public func stopAcceptingRequests() async throws {
-        try await self.waitForClient().stopAcceptingRequests()
-    }
-
     public func registerWorkload(config: WorkloadConfig, properties: WorkloadProperties) async throws {
         try await self.waitForClient().registerWorkload(config: config, properties: properties)
     }
 
     public func updateHealthStatus(status: WorkloadControllerStatus) async throws {
         try await self.waitForClient().updateHealthStatus(status: status)
+    }
+
+    public func restartPrewarmedInstances() async throws {
+        try await self.waitForClient().restartPrewarmedInstances()
     }
 
     private func waitForClient(

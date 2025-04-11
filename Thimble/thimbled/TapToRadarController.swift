@@ -68,7 +68,7 @@ actor TapToRadarController<Store: TapToRadarControllerStore> {
     /// default store
     private let store: Store
 
-    let logger = tc2Logger(forCategory: .Daemon)
+    let logger = tc2Logger(forCategory: .daemon)
 
     init(store: Store = TapToRadarControllerUserDefaultsStore()) {
         self.store = store

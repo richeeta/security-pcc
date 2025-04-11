@@ -16,7 +16,7 @@
 
 import CloudBoardAsyncXPC
 
-public protocol CloudBoardHealthAPIServerToClientProtocol: AnyActor, Sendable {
+public protocol CloudBoardHealthAPIServerToClientProtocol: Actor {
     func healthStateChanged(to healthState: CloudBoardHealthState) async throws
 }
 

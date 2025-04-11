@@ -17,7 +17,7 @@
 import ArgumentParser
 
 public struct CloudServiceStatsdCommand: AsyncParsableCommand {
-    public static var configuration = CommandConfiguration(
+    public static let configuration = CommandConfiguration(
         commandName: "cloudservicestatsd",
         abstract: "agent collecting launchd stat events to emit to metrics backend",
         discussion: """

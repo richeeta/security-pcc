@@ -19,15 +19,17 @@
 //  Created by Marc Orr on 5/2/24.
 //
 
-import Foundation
 import DarwinInitClient
+import Foundation
 import os
 
 private let kDarwinInitDefaultTimeout = 60 * 60 * 3 // 3 hours
 
 internal class DarwinInitChecker {
-	fileprivate static let logger = Logger(subsystem: kEnsemblerPrefix,
-										   category: "DarwinInitChecker")
+	fileprivate static let logger = Logger(
+		subsystem: kEnsemblerPrefix,
+		category: "DarwinInitChecker"
+	)
 	private let darwinInitTimeout: Int
 
 	init(darwinInitTimeout: Int?) {
@@ -42,7 +44,7 @@ internal class DarwinInitChecker {
 		)
 		var darwinInitApplyDone = false
 		while !darwinInitApplyDone,
-			  Util.elapsedTime(startTime, currentTime) < self.darwinInitTimeout {
+		      Util.elapsedTime(startTime, currentTime) < self.darwinInitTimeout {
 			do {
 				applyStatus = try DarwinInitApplyStatus.loadBootStatus()
 				darwinInitApplyDone = true

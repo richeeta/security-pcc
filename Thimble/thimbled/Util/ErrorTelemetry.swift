@@ -123,6 +123,7 @@ extension Error {
                 case .failedToValidateAllAttestations: return "\(prefix)_failedToValidateAllAttestations"
                 case .responseSummaryIndicatesFailure: return "\(prefix)_responseSummaryIndicatesFailure"
                 case .responseSummaryIndicatesUnauthenticated: return "\(prefix)_responseSummaryIndicatesUnauthenticated"
+                case .responseSummaryIndicatesInternalError: return "\(prefix)_responseSummaryIndicatesInternalError"
                 case .responseSummaryIndicatesInvalidRequest: return "\(prefix)_responseSummaryIndicatesInvalidRequest"
                 case .missingAttestationBundle: return "\(prefix)_missingAttestationBundle"
                 case .invalidAttestationBundle: return "\(prefix)_invalidAttestationBundle"

@@ -23,7 +23,7 @@
 import FeatureFlags
 import Foundation
 
-private let logger = tc2Logger(forCategory: .Configuration)
+private let logger = tc2Logger(forCategory: .configuration)
 package let privateCloudComputeOsVariantSubsystem = "com.apple.privateCloudCompute"
 
 // TC2Configuration is a protocol for testability--you can define anything with the

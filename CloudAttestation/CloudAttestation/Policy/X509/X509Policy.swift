@@ -202,13 +202,10 @@ extension AttestationPolicyContext {
     }
 }
 
-// MARK: - Test CA
+// MARK: - CA
 extension X509Policy {
     static let testProvisioningRoots: [SecCertificate] = [SecCertificateCreateWithData(kCFAllocatorDefault, testProvisioningRootCAData as CFData)!]
-    static let prodProvisioningRoots: [SecCertificate] = [
-        SecCertificateCreateWithData(kCFAllocatorDefault, productionProvisioningRootCAData as CFData)!,
-        SecCertificateCreateWithData(kCFAllocatorDefault, productionProvisioningRootCAGen2Data as CFData)!,
-    ]
+    static let prodProvisioningRoots: [SecCertificate] = [SecCertificateCreateWithData(kCFAllocatorDefault, productionProvisioningRootCAData as CFData)!]
 }
 
 // MARK: - X509Policy Errors

@@ -18,10 +18,12 @@ import CloudBoardIdentity
 import CloudBoardLogging
 import CloudBoardMetrics
 import Dispatch
+import Foundation
 import InternalGRPC
 import Network
 import os
 import Security
+import Security_Private.SecCertificatePriv
 
 extension GRPCTLSConfiguration {
     private static let verifyQueue =
@@ -34,9 +36,11 @@ extension GRPCTLSConfiguration {
 
     typealias IdentityCallback = () -> IdentityManager.ResolvedIdentity?
 
+    private static let supportedAPRNDomains = ["sdr", "aci-kube"]
+
     static func cloudboardProviderConfiguration(
         identityCallback: @escaping IdentityCallback,
-        expectedPeerAPRN: APRN?,
+        expectedPeerAPRNs: [APRN]?,
         metricsSystem: MetricsSystem
     ) throws -> GRPCTLSConfiguration {
         let options = NWProtocolTLS.Options()
@@ -54,35 +58,48 @@ extension GRPCTLSConfiguration {
         }
 
         // Set the challenge block.
-        if let expectedPeerAPRN {
-            switch expectedPeerAPRN.domain {
-            case "sdr":
-                sec_protocol_options_set_peer_authentication_required(options.securityProtocolOptions, true)
-                sec_protocol_options_set_verify_block(
-                    options.securityProtocolOptions,
-                    Self.sdrValidationBlock(expectedAPRN: expectedPeerAPRN, metricsSystem: metricsSystem),
-                    Self.verifyQueue
-                )
-            default:
-                Self.validatorLogger.error(
-                    "Unable to set validation logic for APRN \(expectedPeerAPRN, privacy: .public)"
-                )
-                throw TLSConfigurationError.unknownAPRNDomain(expectedPeerAPRN)
+        if let expectedPeerAPRNs, !expectedPeerAPRNs.isEmpty {
+            // Ensure all expected peer APRNs have a supported domain
+            for expectedPeerAPRN in expectedPeerAPRNs {
+                if !Self.supportedAPRNDomains.contains(where: { $0 == expectedPeerAPRN.domain }) {
+                    Self.validatorLogger.error(
+                        "Unable to set validation logic because of unknown APRN domain for \(expectedPeerAPRN, privacy: .public)"
+                    )
+                    throw TLSConfigurationError.unknownAPRNDomain(expectedPeerAPRN)
+                }
             }
+
+            sec_protocol_options_set_peer_authentication_required(options.securityProtocolOptions, true)
+            sec_protocol_options_set_verify_block(
+                options.securityProtocolOptions,
+                Self.validationBlock(expectedAPRNs: expectedPeerAPRNs, metricsSystem: metricsSystem),
+                Self.verifyQueue
+            )
+        } else {
+            Self.validatorLogger.warning("No peer APRNs configured, disabling client certificate validation")
         }
 
         return GRPCTLSConfiguration.makeServerConfigurationBackedByNetworkFramework(options: options)
     }
 
-    private static func sdrValidationBlock(expectedAPRN: APRN, metricsSystem: MetricsSystem) -> sec_protocol_verify_t {
-        precondition(expectedAPRN.domain == "sdr")
-
+    private static func validationBlock(
+        expectedAPRNs: [APRN],
+        metricsSystem: MetricsSystem
+    ) -> sec_protocol_verify_t {
         return { _, trustRef, complete in
-            // For SDR connections we don't trust any root other than the SDR one we provided.
             let trust = sec_trust_copy_ref(trustRef).takeRetainedValue()
-            var rc = SecTrustSetAnchorCertificates(trust, IdentityTranslator.sdrRootCAs as CFArray)
+
+            // We support either SDR or Narrative certs so trust the corresponding root CAs. This is slightly
+            // inefficient (over determining the type of the leaf cert first and then setting the corresponding root
+            // CAs) but we we don't easily get access to the leaf cert before constructing the whole trust chain when
+            // using sec_protocol_options_*, generally don't handle a lot of connections (as connections from ROPES are
+            // long-lived), and will eventually remove SDR support anyway.
+            var rc = SecTrustSetAnchorCertificates(
+                trust,
+                SDRIdentityTranslator.sdrRootCAs + NarrativeValidator.appleCorporateRootCASecCerts as CFArray
+            )
             if rc != errSecSuccess {
-                Self.validatorLogger.error("Unable to trust SDR root, error \(rc, privacy: .public)")
+                Self.validatorLogger.error("Unable to trust SDR/Narrative root CA certs, error \(rc, privacy: .public)")
                 complete(false)
                 Self.emitTLSVerificationFailure(metricsSystem: metricsSystem, failure: .untrustedRootCA)
                 return
@@ -124,31 +141,45 @@ extension GRPCTLSConfiguration {
                     return
                 }
 
-                let computedAPRN: APRN
-                do {
-                    computedAPRN = try IdentityTranslator.computeAPRN(validatedCertChain: chain)
-                } catch {
-                    Self.validatorLogger.error(
-                        "Error computing APRN for chain \(chain, privacy: .public), \(String(unredacted: error), privacy: .public), validation failed"
-                    )
-                    complete(false)
-                    Self.emitTLSVerificationFailure(metricsSystem: metricsSystem, failure: .aprnComputationFailure)
-                    return
+                // Determine the certificate type and validate accordingly
+                let leaf = chain[0]
+                let certAPRNs: [APRN]
+                if leaf.hasExtension(oid: NarrativeValidator.narrativeExtensionOID) {
+                    Self.validatorLogger.debug("Leaf certificate is a Narrative certificate")
+                    do {
+                        certAPRNs = try NarrativeValidator.validateChain(trustedCertChain: chain)
+                    } catch {
+                        Self.validatorLogger.error(
+                            "Error extracting APRNs for chain \(chain, privacy: .public), \(String(unredacted: error), privacy: .public), validation failed"
+                        )
+                        complete(false)
+                        Self.emitTLSVerificationFailure(metricsSystem: metricsSystem, failure: .aprnExtractionFailure)
+                        return
+                    }
+                } else {
+                    Self.validatorLogger.debug("Leaf certificate is an SDR certificate")
+                    do {
+                        certAPRNs = try [SDRIdentityTranslator.validateChainAndComputeAPRN(trustedCertChain: chain)]
+                    } catch {
+                        Self.validatorLogger.error(
+                            "Error computing APRN for chain \(chain, privacy: .public), \(String(unredacted: error), privacy: .public), validation failed"
+                        )
+                        complete(false)
+                        Self.emitTLSVerificationFailure(metricsSystem: metricsSystem, failure: .aprnComputationFailure)
+                        return
+                    }
                 }
 
-                let ourResult = computedAPRN == expectedAPRN
-                if ourResult {
-                    Self.validatorLogger.debug(
-                        "Successfully matched APRNs, \(expectedAPRN, privacy: .public) matched \(computedAPRN, privacy: .public)"
-                    )
+                if let matchedAPRN = expectedAPRNs.first(where: { certAPRNs.contains($0) }) {
+                    Self.validatorLogger.debug("Successfully matched APRN \(matchedAPRN, privacy: .public)")
+                    complete(true)
                 } else {
                     Self.validatorLogger.error(
-                        "Failed to match APRN, expected \(expectedAPRN, privacy: .public) but got \(computedAPRN, privacy: .public)"
+                        "Failed to match APRN, expected \(expectedAPRNs, privacy: .public) but got \(certAPRNs, privacy: .public)"
                     )
                     Self.emitTLSVerificationFailure(metricsSystem: metricsSystem, failure: .untrustedAPRN)
+                    complete(false)
                 }
-
-                complete(ourResult)
             }
 
             if rc != errSecSuccess {
@@ -169,11 +200,22 @@ extension GRPCTLSConfiguration {
     }
 }
 
+extension SecCertificate {
+    func hasExtension(oid: String) -> Bool {
+        return SecCertificateCopyExtensionValue(
+            self,
+            oid as CFString,
+            nil
+        ) != nil
+    }
+}
+
 enum TLSConfigurationError: Error, ReportableError {
     case unknownAPRNDomain(APRN)
+
     var publicDescription: String {
         switch self {
-        case .unknownAPRNDomain(let aprn):
+        case .unknownAPRNDomain:
             return "TLSConfigurationError.unknownAPRNDomain"
         }
     }
@@ -181,11 +223,14 @@ enum TLSConfigurationError: Error, ReportableError {
 
 enum TLSVerificationFailure: String {
     case aprnComputationFailure = "APRN Computation Failure"
+    case aprnExtractionFailure = "APRN Extraction Failure"
     case evaluationCallbackNotInvoked = "Evaluation Callback Not Invoked"
     case invalidCertChain = "Invalid Cert Chain"
     case notAnX509Cert = "Not an X509 Cert"
     case unexpectedCertEvaluationFailure = "Unexpected Cert Evaluation Failure"
     case unexpectedNoCertChain = "Unexpected No Cert Chain"
+    case unexpectedCertChainLength = "Unexpected Cert Chain Length"
     case untrustedRootCA = "Untrusted Root CA"
     case untrustedAPRN = "Untrusted APRN"
+    case unexpectedIntermediateOIDExtensionValue = "Unexpected Intermediate OID Extension Value"
 }

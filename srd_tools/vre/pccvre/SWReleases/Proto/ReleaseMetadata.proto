@@ -51,12 +51,20 @@ message ReleaseMetadata {
     bytes     value     = 2;
   }
 
+  enum FileType {
+    FILE_TYPE_UNSPECIFIED  = 0;
+    FILE_TYPE_IPSW         = 1;
+    FILE_TYPE_DISKIMAGE    = 2;
+    FILE_TYPE_APPLEARCHIVE = 3;
+  }
+
   message Asset {
     AssetType       type        = 1;
     string          url         = 2; // CDN path
     Digest          digest      = 3; // over raw artifact (in url)
     string          variant     = 4;
     optional bytes  ticket      = 5; // matches ticket in leaf node release info
+    FileType        file_type   = 6;
   }
 
   SchemaVersion             schemaVersion = 1; // V1

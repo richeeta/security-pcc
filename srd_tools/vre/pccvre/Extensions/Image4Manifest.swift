@@ -16,25 +16,109 @@
 //
 
 @_spi(Private) import CloudAttestation
+import CryptoKit
 
 extension Image4Manifest {
-    // isDataCryptex returns true if manifest pertains to a cryptex containing no code
-    //  the target platform (PCC) is able to execute
-    func isDataCryptex() -> Bool {
-        guard let topProperties = try? properties else {
-            return false
-        }
+    // name returns ticket digest as simple hex string (unlike description, doesn't include digest algo)
+    var name: String { self.digest().bytes.hexString }
 
-        for topProp in topProperties where topProp.key == "MANP" {
-            if let subProperties = topProp.value as? Image4Manifest.Properties {
-                for subProp in subProperties where subProp.key == "data" {
-                    if let value = subProp.value as? Bool {
-                        return value
-                    }
+    // platformProps returns set of manifest platform properties (MANP 4cc) or nil if unable to extract
+    func platformProps() -> Image4Manifest.Properties? {
+        return try? self.properties.first(where: { $0.key == "MANP" })?.value as? Image4Manifest.Properties
+    }
+
+    // isDataOnly returns true if manifest ticket pertains to a cryptex containing no code
+    //  the target platform (PCC) is able to execute
+    func isDataOnly() -> Bool {
+        if let platformProps = self.platformProps() {
+            for prop in platformProps where prop.key == "data" {
+                if let value = prop.value as? Bool {
+                    return value
                 }
             }
         }
 
         return false
+    }
+
+    // digests returns a dictionary of manifest 4cc and associated Data representing a digest.
+    //  No hints as to the type of digest other than length - presently SHA2 type (sha2-384).
+    //  If there was an error in parsing, nil is returned - an empty map implies no digests were found.
+    func digests() -> [String: Data]? {
+        var digestEntries: [String: Data] = [:]
+        guard let manProps = try? self.properties else {
+            return nil
+        }
+
+        for prop in manProps {
+            guard let subProperties = prop.value as? Image4Manifest.Properties else {
+                return nil
+            }
+
+            for subProp in subProperties where subProp.key == "DGST" {
+                guard let hashData = subProp.value as? Data else {
+                    return nil
+                }
+
+                digestEntries[prop.key] = hashData
+            }
+        }
+
+        return digestEntries
+    }
+
+    // isRestore4cc returns true if the 4cc identifier is associated with a RestoreOS environment
+    static func isRestore4cc(_ fourcc: String) -> Bool {
+        if ["rfta", "rfts"].contains(fourcc) {
+            return true
+        }
+
+        if let tag = Image4Manifest.tagOf(fourcc: fourcc) {
+            return self.isRestoreTag(tag)
+        }
+
+        return false
+    }
+
+    // isRestoreTag returns true if the (BuildManifest) tag is associated with a RestoreOS environment
+    static func isRestoreTag(_ tag: String) -> Bool {
+        return tag.hasPrefix("Restore") || tag.contains(",Restore")
+    }
+
+    // tagOf returns the tag name (used in BuildManifest.plist) corresponding to the 4cc identifier
+    //  (used in tickets) -- returns nil, if no mapping found
+    static func tagOf(fourcc: String) -> String? {
+        for element in Mirror(reflecting: kImg4Types).children.map({ $0.value as! Img4Types }) {
+            if element.fileType.takeRetainedValue() as String == fourcc {
+                return element.requestName.takeRetainedValue() as String
+            }
+        }
+
+        let miscTags: [String: String] = [
+            // libcryptex/asset.c
+            "ginf": "Cryptex1,CryptexInfoPlist",
+            "gtcd": "Cryptex1,GenericTrustCache",
+            "gtgv": "Cryptex1,GenericVolume",
+            "c411": "Ap,CryptexInfoPlist",
+            "pdmg": "PersonalizedDMG",
+
+            // misc tags not centralized
+            "ftap": "ftap",
+            "ftsp": "ftsp",
+            "isys": "SystemVolume",
+            "msys": "Ap,SystemVolumeCanonicalMetadata",
+            "rosi": "OS",
+            "rspt": "Ap,RestoreSecurePageTableMonitor",
+            "rfta": "rfta",
+            "rfts": "rfts",
+            "rtrx": "Ap,RestoreTrustedExecutionMonitor",
+            "sptm": "Ap,SecurePageTableMonitor",
+            "trxm": "Ap,TrustedExecutionMonitor",
+            "BORD": "ApBoardID",
+            "CHIP": "ApChipID",
+            "SDOM": "ApSecurityDomain"
+        ]
+
+        return miscTags[fourcc]
     }
 }

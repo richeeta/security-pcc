@@ -123,6 +123,8 @@ extension CloudBoardJobAuthDConfiguration {
             case _tlsConfig = "TLS"
             // How often to poll the key rotation service for new keys
             case _pollPeriodSeconds = "PollPeriodSeconds"
+            // Signing Keys Validity grace period in seconds
+            case _signingKeysGracePeriodSeconds = "SigningKeyValidityGracePeriodSeconds"
             // Jitter in percent of the poll period
             case _jitter = "Jitter"
             case _backoffConfig = "BackoffConfig"
@@ -139,6 +141,7 @@ extension CloudBoardJobAuthDConfiguration {
             self._tlsConfig ?? .init(enable: true, enablemTLS: true)
         }
 
+        private var _signingKeysGracePeriodSeconds: Int64?
         private var _pollPeriodSeconds: Int64?
         private var _jitter: Double?
         private var _backoffConfig: ConnectionBackoff?
@@ -146,6 +149,11 @@ extension CloudBoardJobAuthDConfiguration {
         /// Interval of requests to Key Rotation Service to update TGT and OTT signing key sets
         public var pollPeriod: Duration {
             self._pollPeriodSeconds.map { .seconds($0) } ?? .seconds(60 * 15)
+        }
+
+        /// TGT and OTT signing keys validity grace period
+        public var signingKeysGracePeriodSeconds: TimeInterval {
+            TimeInterval(integerLiteral: self._signingKeysGracePeriodSeconds ?? 0)
         }
 
         /// Jitter in percent to add to interval between Key Rotation Service requests
@@ -162,6 +170,7 @@ extension CloudBoardJobAuthDConfiguration {
             targetHost: String,
             targetPort: Int,
             pollPeriod: Duration?,
+            signingKeysGracePeriodSeconds: Int64?,
             jitter: Double?,
             tlsConfig: GRPCClientConfiguration.TLSConfiguration? = nil,
             backoffConfig: ConnectionBackoff? = nil
@@ -170,6 +179,7 @@ extension CloudBoardJobAuthDConfiguration {
             self.targetPort = targetPort
             self._tlsConfig = tlsConfig
             self._pollPeriodSeconds = pollPeriod?.components.seconds
+            self._signingKeysGracePeriodSeconds = signingKeysGracePeriodSeconds
             self._jitter = jitter
             self._backoffConfig = backoffConfig
         }

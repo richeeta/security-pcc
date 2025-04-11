@@ -15,6 +15,7 @@
 //  Copyright © 2024 Apple Inc. All rights reserved.
 
 import AsyncAlgorithms
+import Atomics
 import CloudBoardCommon
 import CloudBoardLogging
 import CloudBoardMetrics
@@ -64,11 +65,15 @@ public actor HeartbeatPublisher {
     private let client: any HeartbeatPublisherClientProtocol
     private let hotProperties: HotPropertiesController
     private let metrics: MetricsSystem
+    private let additionalProperties: [String: String]?
     private var publishingMetrics: OperationMetrics {
         .init(
             metricsSystem: self.metrics,
             totalFactory: {
-                Metrics.HeartbeatPublisher.PublishedCounter(action: .increment, isHealthy: self.isHealthy)
+                Metrics.HeartbeatPublisher.PublishedCounter(
+                    action: .increment,
+                    isHealthy: self.isHealthy.load(ordering: .relaxed)
+                )
             },
             cancellationFactory: nil,
             errorFactory: Metrics.HeartbeatPublisher.FailedToPublishCounter.Factory(),
@@ -77,18 +82,7 @@ public actor HeartbeatPublisher {
     }
 
     private var daemonStatus: DaemonStatus = .uninitialized
-    private var isHealthy: Bool {
-        switch self.daemonStatus {
-        case .serviceDiscoveryUpdateSuccess:
-            true
-        case .uninitialized, .initializing, .waitingForFirstAttestationFetch, .waitingForFirstKeyFetch,
-             .waitingForFirstHotPropertyUpdate, .waitingForWorkloadRegistration,
-             .componentsFailedToRun, .serviceDiscoveryUpdateFailure,
-             .serviceDiscoveryPublisherDraining, .daemonDrained,
-             .daemonExitingOnError:
-            false
-        }
-    }
+    private let isHealthy: ManagedAtomic<Bool> = .init(false)
 
     public init(
         configuration: CloudBoardDConfiguration.Heartbeat,
@@ -105,7 +99,8 @@ public actor HeartbeatPublisher {
             statusUpdates: statusMonitor.watch(),
             client: HeartbeatHTTPClient(configuration: .init(configuration)),
             hotProperties: hotProperties,
-            metrics: metrics
+            metrics: metrics,
+            additionalProperties: configuration.additionalProperties
         )
     }
 
@@ -126,7 +121,8 @@ public actor HeartbeatPublisher {
             statusUpdates: stream,
             client: HeartbeatHTTPClient(configuration: .init(configuration)),
             hotProperties: hotProperties,
-            metrics: metrics
+            metrics: metrics,
+            additionalProperties: configuration.additionalProperties
         )
     }
 
@@ -142,7 +138,8 @@ public actor HeartbeatPublisher {
         statusUpdates: any AsyncSequence<DaemonStatus, Never>,
         client: any HeartbeatPublisherClientProtocol,
         hotProperties: HotPropertiesController,
-        metrics: MetricsSystem
+        metrics: MetricsSystem,
+        additionalProperties: [String: String]?
     ) {
         self.configuration = configuration
         self.identifier = identifier
@@ -151,6 +148,7 @@ public actor HeartbeatPublisher {
         self.client = client
         self.hotProperties = hotProperties
         self.metrics = metrics
+        self.additionalProperties = additionalProperties
     }
 
     public func run() async throws {
@@ -183,6 +181,21 @@ public actor HeartbeatPublisher {
 
     private func updateStatus(_ daemonStatus: DaemonStatus) {
         self.daemonStatus = daemonStatus
+        self.updateHealth()
+    }
+
+    private func updateHealth() {
+        let isHealthy = switch self.daemonStatus {
+        case .serviceDiscoveryUpdateSuccess:
+            true
+        case .uninitialized, .initializing, .waitingForFirstAttestationFetch, .waitingForFirstKeyFetch,
+             .waitingForFirstHotPropertyUpdate, .waitingForWorkloadRegistration,
+             .componentsFailedToRun, .serviceDiscoveryUpdateFailure,
+             .serviceDiscoveryPublisherDraining, .daemonDrained,
+             .daemonExitingOnError:
+            false
+        }
+        self.isHealthy.store(isHealthy, ordering: .relaxed)
     }
 
     private func publish() async throws {
@@ -190,9 +203,10 @@ public actor HeartbeatPublisher {
         let identifier = self.identifier
         let status = Heartbeat.Status(from: self.daemonStatus)
         let nodeInfo = self.nodeInfo
+        let isHealthy = self.isHealthy.load(ordering: .relaxed)
         Self.logger
             .log(
-                "publishing heartbeat - identifier: \(identifier, privacy: .public), status: \(status, privacy: .public), isHealthy: \(self.isHealthy, privacy: .public), hot properties version: \(hotPropsVersion ?? "<nil>", privacy: .public), node info: \(nodeInfo?.description ?? "<nil>", privacy: .public)"
+                "publishing heartbeat - identifier: \(identifier, privacy: .public), status: \(status, privacy: .public), isHealthy: \(isHealthy, privacy: .public), hot properties version: \(hotPropsVersion ?? "<nil>", privacy: .public), node info: \(nodeInfo?.description ?? "<nil>", privacy: .public), additional properties: \(self.additionalProperties.flatMap { $0.description } ?? "<nil>", privacy: .public)"
             )
         do {
             try await withErrorLogging(
@@ -204,7 +218,7 @@ public actor HeartbeatPublisher {
                 try await self.client.sendHeartbeat(
                     .init(
                         identifier: identifier,
-                        isUp: self.isHealthy,
+                        isUp: self.isHealthy.load(ordering: .relaxed),
                         status: status,
                         source: .cloudboardd,
                         senderType: .node,
@@ -215,7 +229,8 @@ public actor HeartbeatPublisher {
                             serverOSReleaseType: nodeInfo?.serverOSReleaseType,
                             serverOSBuildVersion: nodeInfo?.serverOSBuildVersion,
                             configVersion: hotPropsVersion,
-                            workloadEnabled: nodeInfo?.workloadEnabled
+                            workloadEnabled: nodeInfo?.workloadEnabled,
+                            additionalProperties: self.additionalProperties
                         )
                     )
                 )

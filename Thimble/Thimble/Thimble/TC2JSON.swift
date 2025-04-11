@@ -35,7 +35,7 @@ extension TC2JSON where Self: Codable {
             // error on the part of Thimble. The JSON encoder is going to trip itself
             // up on things like unsupported dictionary values or cyclical references,
             // and in such a case we're entirely to blame. Now we can find out fast!
-            fatalError("\(#function): Error encoding value of type \(Self.self). This is a bug in privatecloudcomputed.")
+            fatalError("Error encoding value of type \(Self.self). This is a bug in privatecloudcomputed.")
         }
     }
 
@@ -46,8 +46,8 @@ extension TC2JSON where Self: Codable {
         if let decoded = try? JSONDecoder().decode(Self.self, from: json) {
             self = decoded
         } else {
-            let logger = tc2Logger(forCategory: .Client)
-            logger.error("\(#function): Unable to decode JSON/XPC bytes, count=\(json.count)")
+            let logger = tc2Logger(forCategory: .client)
+            logger.error("Unable to decode JSON/XPC bytes, count=\(json.count)")
             return nil
         }
     }

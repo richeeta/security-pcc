@@ -45,7 +45,7 @@ extension CLI.InstanceCmd {
         var vreName: String
 
         @Option(name: [.customLong("release"), .customShort("R")],
-                help: "SW Release Log index, or path to release .json or .protobuf file.",
+                help: "SW Release Log index, or path to release metadata .json or .protobuf file. Release assets must be downloaded with `pccvre release download` prior to this.",
                 completion: .file())
         var release: String?
 
@@ -170,11 +170,17 @@ extension CLI.InstanceCmd {
                         throw CLIError("\(CLIDefaults.assetsDirectory.path): \(error)")
                     }
 
-                    guard let relMD = assetHelper.loadRelease(
-                        index: relIndex,
-                        logEnvironment: logEnvironment
-                    ) else {
-                        throw CLIError("SW Release info not found for index \(relIndex): downloaded?")
+                    let relMD: SWReleaseMetadata
+                    do {
+                        (_, relMD) = try assetHelper.loadRelease(
+                            index: relIndex,
+                            logEnvironment: logEnvironment
+                        )
+                    } catch {
+                        let logmsg = "release lookup [\(logEnvironment):\(relIndex)]: \(error)"
+                        CLI.logger.error("\(logmsg, privacy: .public)")
+
+                        throw CLIError("SW Release info not found for index \(relIndex): have assets been downloaded?")
                     }
 
                     releaseMetadata = relMD
@@ -205,9 +211,7 @@ extension CLI.InstanceCmd {
                 }
 
                 darwinInit = releaseDarwinInit
-                if let relid = releaseMetadata.releaseHash {
-                    releaseID = relid.hexString
-                }
+                releaseID = releaseMetadata.releaseHash.hexString
             }
 
             var osVariant = self.osVariant
@@ -223,7 +227,7 @@ extension CLI.InstanceCmd {
                     try releaseAssets.append(CryptexSpec(
                         path: osImage,
                         variant: osVariantName ?? osVariant ?? "Unknown",
-                        assetType: SWReleaseMetadata.assetTypeName(.os)
+                        assetType: SWReleaseMetadata.AssetType.os.label
                     ))
                 }
             }
@@ -304,7 +308,8 @@ extension CLI.InstanceCmd {
                     try releaseAssets.append(CryptexSpec(
                         path: assetPath.string,
                         variant: osAsset.variant,
-                        assetType: SWReleaseMetadata.assetTypeName(osAsset.type)
+                        assetType: osAsset.type.label,
+                        fileType: osAsset.fileType.assetFileType
                     ))
 
                     CLI.logger.log("OS release asset: \(assetPath.string, privacy: .public)")
@@ -321,7 +326,7 @@ extension CLI.InstanceCmd {
                         try releaseAssets.append(CryptexSpec(
                             path: assetPath.string,
                             variant: asset.variant,
-                            assetType: SWReleaseMetadata.assetTypeName(asset.type)
+                            assetType: asset.type.label
                         ))
 
                         CLI.logger.log("cryptex release asset: \(assetPath.string, privacy: .public)")
@@ -338,7 +343,7 @@ extension CLI.InstanceCmd {
                     try releaseAssets.append(CryptexSpec(
                         path: assetPath.string,
                         variant: toolsAsset.variant,
-                        assetType: SWReleaseMetadata.assetTypeName(toolsAsset.type)
+                        assetType: toolsAsset.type.label
                     ))
 
                     CLI.logger.log("host tools release image: \(assetPath.string, privacy: .public)")

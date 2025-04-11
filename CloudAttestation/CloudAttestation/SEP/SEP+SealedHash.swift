@@ -19,7 +19,7 @@
 //  Copyright © 2024 Apple Inc. All rights reserved.
 //
 
-@preconcurrency import CryptoKit
+import CryptoKit
 import AppleKeyStore
 
 extension SEP {

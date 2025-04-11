@@ -216,6 +216,7 @@ public enum TrustedCloudComputeError: Swift.Error, Sendable, Codable, TC2JSON {
             case failedToValidateAllAttestations
             case responseSummaryIndicatesFailure
             case responseSummaryIndicatesUnauthenticated
+            case responseSummaryIndicatesInternalError
             case responseSummaryIndicatesInvalidRequest
             case missingAttestationBundle
             case invalidAttestationBundle
@@ -262,7 +263,7 @@ extension TrustedCloudComputeError {
     package init(responseMetadata: TC2RopesResponseMetadata) {
         assert(responseMetadata.isError)
 
-        if case let .errorCode(errorCode) = responseMetadata.receivedErrorCode {
+        if case .errorCode(let errorCode) = responseMetadata.receivedErrorCode {
             switch errorCode {
             // deniedDueToRateLimit
             case .rateLimitReached:
@@ -547,10 +548,10 @@ extension TrustedCloudComputeError.ServerErrorInfo: CustomStringConvertible {
         if let status = responseMetadata.status {
             result.append("status=\(status)")
         }
-        if case let .errorCode(errorCode) = responseMetadata.receivedErrorCode {
+        if case .errorCode(let errorCode) = responseMetadata.receivedErrorCode {
             result.append("error-code=\(errorCode)")
         }
-        if case let .unrecognizedErrorCode(rawValue) = responseMetadata.receivedErrorCode {
+        if case .unrecognizedErrorCode(let rawValue) = responseMetadata.receivedErrorCode {
             result.append("error-code=\(rawValue)")
         }
         if let errorDescription = responseMetadata.errorDescription {

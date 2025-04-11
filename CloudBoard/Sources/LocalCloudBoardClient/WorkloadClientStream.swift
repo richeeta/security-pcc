@@ -23,7 +23,7 @@ typealias InvokeWorkloadResponse = Com_Apple_Cloudboard_Api_V1_InvokeWorkloadRes
 typealias InvokeWorkloadClientStreamCall = BidirectionalStreamingCall<InvokeWorkloadRequest, InvokeWorkloadResponse>
 
 enum CloudBoardResponseChunk {
-    case apiChunk(Com_Apple_Cloudboard_Api_V1_Chunk)
+    case apiChunk(Proto_Ropes_Common_Chunk)
     case stringChunk(String)
 }
 
@@ -32,6 +32,7 @@ enum WorkloadClientStreamError: Error {
     case grpcNotOk(GRPCStatus)
 }
 
+@available(*, deprecated, renamed: "WorkloadAsyncClientStream")
 class WorkloadClientStream {
     private let client: LocalCloudBoardGRPCClient.CloudBoardGrpcClient
 
@@ -91,18 +92,18 @@ class WorkloadClientStream {
 
     private func sendSetup(stream: InvokeWorkloadClientStreamCall) throws {
         let request = InvokeWorkloadRequest.with {
-            $0.setup = Com_Apple_Cloudboard_Api_V1_Setup()
+            $0.setup = Com_Apple_Cloudboard_Api_V1_InvokeWorkloadRequest.Setup()
         }
         try stream.sendMessage(request).wait()
     }
 
     private func sendParameters(stream: InvokeWorkloadClientStreamCall, keyID: Data, key: Data) throws {
-        let decryptionKey = Com_Apple_Cloudboard_Api_V1_DecryptionKey.with {
+        let decryptionKey = Proto_Ropes_Common_DecryptionKey.with {
             $0.keyID = keyID
             $0.encryptedPayload = key
         }
 
-        let parameters = Com_Apple_Cloudboard_Api_V1_Parameters.with {
+        let parameters = Com_Apple_Cloudboard_Api_V1_InvokeWorkloadRequest.Parameters.with {
             $0.decryptionKey = decryptionKey
             // set the tenant info values to clearly identify LocalCloudBoardClient traffic
             $0.tenantInfo = .with {
@@ -120,7 +121,7 @@ class WorkloadClientStream {
     }
 
     private func sendChunk(stream: InvokeWorkloadClientStreamCall, data: Data, isFinal: Bool) throws {
-        let requestChunk = Com_Apple_Cloudboard_Api_V1_Chunk.with {
+        let requestChunk = Proto_Ropes_Common_Chunk.with {
             $0.encryptedPayload = data
             $0.isFinal = isFinal
         }
@@ -131,12 +132,112 @@ class WorkloadClientStream {
     }
 }
 
-extension Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeRequest {
-    typealias TrustedCloudComputeRequest = Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeRequest
-    typealias TrustedCloudComputeRequestType = TrustedCloudComputeRequest.OneOf_Type
+class WorkloadAsyncClientStream {
+    private let client: LocalCloudBoardGRPCAsyncClient.CloudBoardGrpcClient
 
-    static func serialized(with type: TrustedCloudComputeRequestType) throws -> Data {
-        var request = try TrustedCloudComputeRequest.with {
+    public init(client: LocalCloudBoardGRPCAsyncClient.CloudBoardGrpcClient) {
+        self.client = client
+    }
+
+    public func submitWorkload(
+        keyID: Data,
+        key: Data,
+        chunks: [Data]
+    ) -> GRPCAsyncResponseStream<Com_Apple_Cloudboard_Api_V1_InvokeWorkloadResponse> {
+        let (requestStream, requestContinuation) = AsyncStream.makeStream(
+            of: InvokeWorkloadRequest.self
+        )
+
+        let responseStream = self.client.invokeWorkload(requestStream)
+
+        // send setup request to start warming process
+        requestContinuation.yield(self.setupRequest())
+
+        // send parameters with decryption key
+        requestContinuation.yield(self.parametersRequest(keyID: keyID, key: key))
+
+        // send request chunks
+        for (index, chunk) in chunks.enumerated() {
+            requestContinuation.yield(self.chunkRequest(data: chunk, isFinal: index == chunks.count - 1))
+        }
+        requestContinuation.finish()
+        return responseStream
+    }
+
+    public func submitWithAuthToken(
+        keyID: Data,
+        key: Data,
+        authToken: Data,
+        _ body: (
+            AsyncStream<InvokeWorkloadRequest>.Continuation,
+            GRPCAsyncResponseStream<Com_Apple_Cloudboard_Api_V1_InvokeWorkloadResponse>
+        ) async throws -> Void
+    ) async throws {
+        let (requestStream, requestContinuation) = AsyncStream.makeStream(
+            of: InvokeWorkloadRequest.self
+        )
+
+        let responseStream = self.client.invokeWorkload(requestStream)
+
+        defer {
+            requestContinuation.finish()
+        }
+        // send setup request to start warming process
+        requestContinuation.yield(self.setupRequest())
+
+        // send parameters with decryption key
+        requestContinuation.yield(self.parametersRequest(keyID: keyID, key: key))
+        requestContinuation.yield(self.chunkRequest(data: authToken, isFinal: false))
+        try await body(requestContinuation, responseStream)
+    }
+
+    private func setupRequest() -> InvokeWorkloadRequest {
+        let request = InvokeWorkloadRequest.with {
+            $0.setup = Com_Apple_Cloudboard_Api_V1_InvokeWorkloadRequest.Setup()
+        }
+        return request
+    }
+
+    private func parametersRequest(keyID: Data, key: Data) -> InvokeWorkloadRequest {
+        let decryptionKey = Proto_Ropes_Common_DecryptionKey.with {
+            $0.keyID = keyID
+            $0.encryptedPayload = key
+        }
+
+        let parameters = Com_Apple_Cloudboard_Api_V1_InvokeWorkloadRequest.Parameters.with {
+            $0.decryptionKey = decryptionKey
+            // set the tenant info values to clearly identify LocalCloudBoardClient traffic
+            $0.tenantInfo = .with {
+                $0.bundleID = "local-cloudboard-client"
+                $0.automatedDeviceGroup = "local-test-device"
+            }
+        }
+
+        let request = InvokeWorkloadRequest.with {
+            $0.parameters = parameters
+        }
+
+        return request
+    }
+
+    private func chunkRequest(data: Data, isFinal: Bool) -> InvokeWorkloadRequest {
+        let requestChunk = Proto_Ropes_Common_Chunk.with {
+            $0.encryptedPayload = data
+            $0.isFinal = isFinal
+        }
+        let request = InvokeWorkloadRequest.with {
+            $0.requestChunk = requestChunk
+        }
+        return request
+    }
+}
+
+extension Proto_PrivateCloudCompute_PrivateCloudComputeRequest {
+    typealias PrivateCloudComputeRequest = Proto_PrivateCloudCompute_PrivateCloudComputeRequest
+    typealias PrivateCloudComputeRequestType = PrivateCloudComputeRequest.OneOf_Type
+
+    static func serialized(with type: PrivateCloudComputeRequestType) throws -> Data {
+        var request = try PrivateCloudComputeRequest.with {
             $0.type = type
         }.serializedData()
         request.prependLength()
@@ -144,12 +245,12 @@ extension Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeRequest {
     }
 }
 
-extension Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeResponse {
-    typealias TrustedCloudComputeResponse = Com_Apple_Privatecloudcompute_Api_V1_PrivateCloudComputeResponse
-    typealias TrustedCloudComputeResponseType = TrustedCloudComputeResponse.OneOf_Type
+extension Proto_PrivateCloudCompute_PrivateCloudComputeResponse {
+    typealias PrivateCloudComputeResponse = Proto_PrivateCloudCompute_PrivateCloudComputeResponse
+    typealias PrivateCloudComputeResponseType = PrivateCloudComputeResponse.OneOf_Type
 
-    static func serialized(with type: TrustedCloudComputeResponseType) throws -> Data {
-        var request = try TrustedCloudComputeResponse.with {
+    static func serialized(with type: PrivateCloudComputeResponseType) throws -> Data {
+        var request = try PrivateCloudComputeResponse.with {
             $0.type = type
         }.serializedData()
         request.prependLength()

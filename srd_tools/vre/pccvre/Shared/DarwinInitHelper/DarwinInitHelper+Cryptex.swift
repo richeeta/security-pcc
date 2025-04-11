@@ -59,7 +59,7 @@ extension DarwinInitHelper {
         }
 
         func asDictionary() -> [String: Any] {
-            // subscript() can't be coerced to underlying type :(
+            // subscript() can't be coerced to underlying type
             return cryptex
         }
     }

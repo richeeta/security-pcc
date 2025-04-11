@@ -39,22 +39,6 @@ struct Attestation: Sendable, Hashable {
     var unvalidatedCellID: String?
 
     var ensembleID: String?
-
-    init(
-        nodeID: String,
-        attestationBundle: Data?,
-        cloudOSVersion: String,
-        cloudOSReleaseType: String,
-        unvalidatedCellID: String?,
-        ensembleID: String?
-    ) {
-        self.nodeID = nodeID
-        self.attestationBundle = attestationBundle
-        self.cloudOSVersion = cloudOSVersion
-        self.cloudOSReleaseType = cloudOSReleaseType
-        self.unvalidatedCellID = unvalidatedCellID
-        self.ensembleID = ensembleID
-    }
 }
 
 extension Attestation {

@@ -26,6 +26,7 @@ extension TransparencyLog {
         init(
             endpoint: URL, // KTInitBag: at-researcher-public-keys
             tlsInsecure: Bool = false,
+            useIdentity: Bool = false,
             requestUUID: UUID = UUID()
         ) async throws {
             let pubKeysReq = TxPB_PublicKeysRequest.with { builder in
@@ -34,15 +35,15 @@ extension TransparencyLog {
                 builder.requestUuid = requestUUID.uuidString
             }
 
-            let (respData, _) = try await postPBURL(
-                logger: TransparencyLog.traceLog ? TransparencyLog.logger : nil,
+            let (respData, _) = try await TransparencyLog.urlPostProtbuf(
                 url: endpoint,
                 tlsInsecure: tlsInsecure,
+                useIdentity: useIdentity,
                 requestBody: pubKeysReq.serializedData(),
                 headers: [TransparencyLog.requestUUIDHeader: requestUUID.uuidString]
             )
 
-            let pubKeysResp = try TxPB_PublicKeysResponse(serializedData: respData)
+            let pubKeysResp = try TxPB_PublicKeysResponse(serializedBytes: respData)
             if pubKeysResp.status != .ok {
                 throw TransparencyLogError("response: status=\(pubKeysResp.status.rawValue)")
             }

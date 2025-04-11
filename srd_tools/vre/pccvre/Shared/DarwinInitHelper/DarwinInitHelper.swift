@@ -221,9 +221,23 @@ struct DarwinInitHelper {
 
     // addCryptex replaces existing (with matching variant) or otherwise introduces new cryptex entry
     mutating func addCryptex(_ new: DarwinInitHelper.Cryptex) {
-        removeCryptex(variant: new.variant)
-        cryptexes.append(new)
-        DarwinInitHelper.logger.log("add cryptex '\(new.variant, privacy: .public)' (\(new.url, privacy: .public))")
+        // preserve the order of cryptexes if replacing
+        var replaced = false
+        let updatedCryptexes = cryptexes.map {
+            if $0.variant == new.variant {
+                replaced = true
+                return new
+            } else {
+                return $0
+            }
+        }
+        if replaced {
+            cryptexes = updatedCryptexes
+            DarwinInitHelper.logger.log("replaced cryptex '\(new.variant, privacy: .public)' (\(new.url, privacy: .public))")
+        } else {
+            cryptexes.append(new)
+            DarwinInitHelper.logger.log("added cryptex '\(new.variant, privacy: .public)' (\(new.url, privacy: .public))")
+        }
     }
 
     // removeCryptex deletes existing cryptex entry with matching variant; returns true if updated
@@ -234,7 +248,6 @@ struct DarwinInitHelper {
 
         loaded = loaded.filter {
             if $0.variant == variant {
-                DarwinInitHelper.logger.log("remove cryptex variant '\(variant, privacy: .public)'")
                 updated = true
                 return false
             }
@@ -244,6 +257,7 @@ struct DarwinInitHelper {
 
         if updated {
             cryptexes = loaded
+            DarwinInitHelper.logger.log("removed cryptex variant '\(variant, privacy: .public)'")
         }
 
         return updated
@@ -277,37 +291,38 @@ struct DarwinInitHelper {
     mutating func populateReleaseCryptexes(
         assets: [CryptexSpec]
     ) throws {
-        for diCryptex in cryptexes {
-            // match cryptex variant tags in darwin-init ("ASSET_TYPE_XX") to entries in release assets
-            if let assetType = SWReleaseMetadata.assetTypeByName(diCryptex.variant) {
-                let assetsOfType = assets.filter {
-                    SWReleaseMetadata.assetTypeName(assetType) == $0.assetType
-                }
-                guard assetsOfType.count == 1 else {
-                    if assetsOfType.count == 0 {
-                        AssetHelper.logger.error("'\(diCryptex.variant, privacy: .public)' from darwin-init in release assets not found")
-                    } else {
-                        let assetType = SWReleaseMetadata.assetTypeName(assetType)
-                        AssetHelper.logger.error("count of \(assetType, privacy: .public) in darwin-init != 1 (\(assetsOfType.count, privacy: .public))")
-                    }
-
-                    continue
-                }
-
-                let asset = assetsOfType[0]
-                let assetVariant = asset.variant
-
-                removeCryptex(variant: diCryptex.variant)
-                guard let assetBasename = asset.path.lastComponent?.string else {
-                    throw VREError("derive basename from asset path: \(asset.path)")
-                }
-
-                addCryptex(DarwinInitHelper.Cryptex(
-                    url: assetBasename,
-                    variant: assetVariant
-                ))
+        let populatedCryptexes = try cryptexes.map { diCryptex in
+            guard let asset = findAsset(label: diCryptex.variant, assets: assets) else {
+                return diCryptex
             }
+
+            let assetVariant = asset.variant
+            guard let assetBasename = asset.path.lastComponent?.string else {
+                throw VREError("derive basename from asset path: \(asset.path)")
+            }
+
+            return DarwinInitHelper.Cryptex(
+                url: assetBasename,
+                variant: assetVariant
+            )
         }
+        cryptexes = populatedCryptexes
+    }
+
+    func findAsset(label: String, assets: [CryptexSpec]) -> CryptexSpec? {
+        guard let _ = SWReleaseMetadata.AssetType(label: label) else {
+            return nil
+        }
+        let assetsOfType = assets.filter { $0.assetType == label }
+        guard assetsOfType.count == 1 else {
+            if assetsOfType.count == 0 {
+                AssetHelper.logger.error("'\(label, privacy: .public)' from darwin-init in release assets not found")
+            } else {
+                AssetHelper.logger.error("count of \(label, privacy: .public) in darwin-init != 1 (\(assetsOfType.count, privacy: .public))")
+            }
+            return nil
+        }
+        return assetsOfType[0]
     }
 }
 

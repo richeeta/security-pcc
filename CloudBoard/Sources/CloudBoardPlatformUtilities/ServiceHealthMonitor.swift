@@ -13,6 +13,7 @@
 // 10/02/2024
 
 //  Copyright © 2023 Apple Inc. All rights reserved.
+import CloudBoardController
 import os
 
 public final class ServiceHealthMonitor: Sendable {
@@ -144,7 +145,7 @@ extension ServiceHealthMonitor {
 
     public enum Status: Sendable, Hashable, CustomStringConvertible {
         case initializing
-        case healthy(Healthy)
+        case healthy(Healthy?)
         case unhealthy
 
         public var description: String {
@@ -160,19 +161,23 @@ extension ServiceHealthMonitor {
 
         public func withCurrentBatchCountOverride(_ count: Int?) -> Status {
             if let count {
-                return switch self {
+                switch self {
                 case .initializing:
-                    .initializing
+                    return .initializing
                 case .healthy(let healthyState):
-                    .healthy(.init(
-                        workloadType: healthyState.workloadType,
-                        tags: healthyState.tags,
-                        maxBatchSize: healthyState.maxBatchSize,
-                        currentBatchSize: count,
-                        optimalBatchSize: healthyState.optimalBatchSize
-                    ))
+                    var newHealthyState: ServiceHealthMonitor.Status.Healthy?
+                    if let healthyState {
+                        newHealthyState = .init(
+                            workloadType: healthyState.workloadType,
+                            tags: healthyState.tags,
+                            maxBatchSize: healthyState.maxBatchSize,
+                            currentBatchSize: count,
+                            optimalBatchSize: healthyState.optimalBatchSize
+                        )
+                    }
+                    return .healthy(newHealthyState)
                 case .unhealthy:
-                    .unhealthy
+                    return .unhealthy
                 }
             } else {
                 return self
@@ -185,7 +190,7 @@ extension ServiceHealthMonitor.Status {
     public struct Healthy: Sendable, Hashable {
         public var workloadType: String
 
-        public var tags: [String: [String]]
+        public var tags: [String: WorkloadConfig.RoutingTagValue]
 
         public var maxBatchSize: Int
 
@@ -195,7 +200,7 @@ extension ServiceHealthMonitor.Status {
 
         public init(
             workloadType: String,
-            tags: [String: [String]],
+            tags: [String: WorkloadConfig.RoutingTagValue],
             maxBatchSize: Int,
             currentBatchSize: Int,
             optimalBatchSize: Int

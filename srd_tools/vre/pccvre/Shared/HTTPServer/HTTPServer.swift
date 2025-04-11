@@ -73,6 +73,7 @@ struct HTTPServer {
     mutating func start() throws {
         let docDir = self.docDir
         let fileIO = NonBlockingFileIO(threadPool: .singleton)
+
         func childChannelInitializer(channel: Channel) -> EventLoopFuture<Void> {
             return channel.pipeline.configureHTTPServerPipeline(withErrorHandling: true).flatMap {
                 channel.pipeline.addHandler(HTTPHandler(fileIO: fileIO, htdocsPath: docDir))
