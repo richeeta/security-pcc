@@ -1,6 +1,6 @@
 # Private Cloud Compute
 
-This source code accompanies the Private Cloud Compute (PCC) [Security Guide](https://security.apple.com/documentation/private-cloud-compute/) also available at [pcc-guide.md](https://github.com/richeeta/security-pcc/pcc-guide.md).
+This source code accompanies the Private Cloud Compute (PCC) [Security Guide](https://security.apple.com/documentation/private-cloud-compute/) also available at [pcc-guide.md]([https://github.com/richeeta/security-pcc/pcc-guide.md](https://github.com/richeeta/security-pcc/blob/main/pcc-guide.md)).
 
 ## About The Source Code
 
